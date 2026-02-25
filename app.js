@@ -57,7 +57,7 @@ async function initFirebase() {
           setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
           orderBy, query, where }  = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
-  const app = initializeApp(FIREBASE_CONFIG);
+  const app = initializeApp(firebaseConfig);
   db = getFirestore(app);
 
   // Expose Firestore helpers globally for the rest of the module
