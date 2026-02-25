@@ -33,6 +33,23 @@ function saveState() {
 }
 
 /* ==============================
+   THEME
+   ============================== */
+function loadTheme() {
+  const saved = localStorage.getItem('resourceHubTheme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next    = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('resourceHubTheme', next);
+}
+
+document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+
+/* ==============================
    UTILITIES
    ============================== */
 function uid() {
@@ -63,9 +80,9 @@ function esc(str) {
    RENDER
    ============================== */
 function render() {
-  const query   = document.getElementById('searchInput').value.trim().toLowerCase();
-  const main    = document.getElementById('mainContent');
-  const empty   = document.getElementById('emptyState');
+  const query = document.getElementById('searchInput').value.trim().toLowerCase();
+  const main  = document.getElementById('mainContent');
+  const empty = document.getElementById('emptyState');
 
   // Clear non-empty-state children
   [...main.children].forEach(c => { if (c !== empty) c.remove(); });
@@ -76,7 +93,6 @@ function render() {
   }
   empty.classList.add('hidden');
 
-  // If there are no sections but query is present → show nothing special
   if (state.sections.length === 0) return;
 
   let totalVisible = 0;
@@ -84,7 +100,6 @@ function render() {
   state.sections.forEach(sec => {
     const secResources = state.resources.filter(r => r.sectionId === sec.id);
 
-    // Filter by query
     const filtered = query
       ? secResources.filter(r =>
           r.name.toLowerCase().includes(query) ||
@@ -94,7 +109,6 @@ function render() {
         )
       : secResources;
 
-    // Hide entire section if query and no matches
     if (query && filtered.length === 0) return;
 
     totalVisible += filtered.length;
@@ -108,7 +122,7 @@ function render() {
         <span class="section-name" data-section-id="${sec.id}" title="Click to rename">${esc(sec.name)}</span>
         <span class="section-count">${filtered.length}</span>
         <div class="section-actions">
-          <button class="btn btn-sm btn-outline add-res-to-sec" data-section-id="${sec.id}" title="Add resource to this section">+ Resource</button>
+          <button class="btn btn-sm btn-outline add-res-to-sec" data-section-id="${sec.id}">+ Resource</button>
           <button class="btn-icon rename-sec" data-section-id="${sec.id}" title="Rename section">✎</button>
           <button class="btn-icon delete-sec" data-section-id="${sec.id}" title="Delete section">✕</button>
         </div>
@@ -121,16 +135,12 @@ function render() {
     if (filtered.length === 0) {
       grid.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
     } else {
-      filtered.forEach((r, i) => {
-        const card = buildCard(r, i);
-        grid.appendChild(card);
-      });
+      filtered.forEach((r, i) => grid.appendChild(buildCard(r, i)));
     }
 
     main.appendChild(block);
   });
 
-  // If query with no results at all
   if (query && totalVisible === 0) {
     const msg = document.createElement('div');
     msg.className = 'search-no-results';
@@ -146,8 +156,8 @@ function buildCard(r, index) {
   card.style.animationDelay = `${index * 30}ms`;
 
   const faviconUrl = getFavicon(r.url);
-  const domain = getDomain(r.url);
-  const letter = r.name.charAt(0).toUpperCase();
+  const domain     = getDomain(r.url);
+  const letter     = r.name.charAt(0).toUpperCase();
 
   const tagsHtml = r.tags && r.tags.length
     ? `<div class="card-tags">${r.tags.map(t => `<span class="card-tag">${esc(t)}</span>`).join('')}</div>`
@@ -175,7 +185,11 @@ function buildCard(r, index) {
     <div class="card-footer">
       <a class="card-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">
         Open
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <polyline points="15 3 21 3 21 9"/>
+          <line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
       </a>
       <button class="card-menu-btn" data-resource-id="${r.id}" title="Options">⋯</button>
     </div>
@@ -202,7 +216,7 @@ function renameSection(id, name) {
 
 function deleteSection(id) {
   if (!confirm('Delete this section and all its resources?')) return;
-  state.sections = state.sections.filter(s => s.id !== id);
+  state.sections  = state.sections.filter(s => s.id !== id);
   state.resources = state.resources.filter(r => r.sectionId !== id);
   saveState();
   render();
@@ -216,7 +230,7 @@ function addResource(data) {
     id: uid(),
     sectionId: data.sectionId,
     name: data.name.trim(),
-    url: data.url.trim(),
+    url:  data.url.trim(),
     desc: data.desc ? data.desc.trim() : '',
     tags: data.tags ? data.tags.split(',').map(t => t.trim()).filter(Boolean) : []
   };
@@ -245,30 +259,22 @@ function deleteResource(id) {
 }
 
 function moveOrCopyResource(resourceId, targetSectionId, action) {
+  const r = state.resources.find(r => r.id === resourceId);
+  if (!r) return;
   if (action === 'move') {
-    const r = state.resources.find(r => r.id === resourceId);
-    if (r) { r.sectionId = targetSectionId; saveState(); render(); }
+    r.sectionId = targetSectionId;
   } else {
-    const r = state.resources.find(r => r.id === resourceId);
-    if (r) {
-      const copy = { ...r, id: uid(), sectionId: targetSectionId };
-      state.resources.push(copy);
-      saveState();
-      render();
-    }
+    state.resources.push({ ...r, id: uid(), sectionId: targetSectionId });
   }
+  saveState();
+  render();
 }
 
 /* ==============================
    MODAL HELPERS
    ============================== */
-function openModal(id) {
-  document.getElementById(id).classList.add('open');
-}
-
-function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
-}
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 function populateSectionSelect(selectId, excludeId = null) {
   const sel = document.getElementById(selectId);
@@ -299,17 +305,17 @@ function openResourceModal(resourceId = null, defaultSectionId = null) {
   if (resourceId) {
     const r = state.resources.find(r => r.id === resourceId);
     titleEl.textContent = 'Edit Resource';
-    nameEl.value  = r.name;
-    urlEl.value   = r.url;
-    descEl.value  = r.desc || '';
-    tagsEl.value  = r.tags ? r.tags.join(', ') : '';
-    secSel.value  = r.sectionId;
+    nameEl.value = r.name;
+    urlEl.value  = r.url;
+    descEl.value = r.desc || '';
+    tagsEl.value = r.tags ? r.tags.join(', ') : '';
+    secSel.value = r.sectionId;
   } else {
     titleEl.textContent = 'Add Resource';
-    nameEl.value  = '';
-    urlEl.value   = '';
-    descEl.value  = '';
-    tagsEl.value  = '';
+    nameEl.value = '';
+    urlEl.value  = '';
+    descEl.value = '';
+    tagsEl.value = '';
     if (defaultSectionId) secSel.value = defaultSectionId;
   }
 
@@ -348,7 +354,6 @@ function openMoveModal(resourceId) {
 
   document.getElementById('moveResourceName').textContent = `"${r.name}"`;
   populateSectionSelect('moveTarget', null);
-  // Default to a different section if possible
   const otherSec = state.sections.find(s => s.id !== r.sectionId);
   if (otherSec) document.getElementById('moveTarget').value = otherSec.id;
 
@@ -369,11 +374,10 @@ function openContextMenu(resourceId, x, y) {
   menu.style.top  = y + 'px';
   menu.classList.add('open');
 
-  // Clamp to viewport
   requestAnimationFrame(() => {
     const rect = menu.getBoundingClientRect();
-    if (rect.right > window.innerWidth - 8)  menu.style.left = (x - rect.width) + 'px';
-    if (rect.bottom > window.innerHeight - 8) menu.style.top = (y - rect.height) + 'px';
+    if (rect.right  > window.innerWidth  - 8) menu.style.left = (x - rect.width)  + 'px';
+    if (rect.bottom > window.innerHeight - 8) menu.style.top  = (y - rect.height) + 'px';
   });
 }
 
@@ -403,23 +407,19 @@ searchClear.addEventListener('click', () => {
    DELEGATED CLICK HANDLER
    ============================== */
 document.addEventListener('click', e => {
-  // Close context menu on any click
   if (!e.target.closest('#contextMenu')) closeContextMenu();
 
-  // Modal close buttons
   const closeBtn = e.target.closest('[data-close]');
   if (closeBtn) { closeModal(closeBtn.dataset.close); return; }
 
-  // Backdrop click closes modal
   if (e.target.classList.contains('modal-backdrop')) {
-    closeModal(e.target.id);
-    return;
+    closeModal(e.target.id); return;
   }
 
-  // Header buttons
   if (e.target.id === 'addSectionBtn' || e.target.id === 'emptyAddSectionBtn') {
     openSectionModal(); return;
   }
+
   if (e.target.id === 'addResourceBtn' || e.target.id === 'emptyAddResourceBtn') {
     if (state.sections.length === 0) {
       alert('Please add a section first.');
@@ -429,25 +429,20 @@ document.addEventListener('click', e => {
     openResourceModal(); return;
   }
 
-  // Section: add resource button
   const addToSec = e.target.closest('.add-res-to-sec');
   if (addToSec) { openResourceModal(null, addToSec.dataset.sectionId); return; }
 
-  // Section: rename button
   const renameSec = e.target.closest('.rename-sec');
   if (renameSec) { openSectionModal(renameSec.dataset.sectionId); return; }
 
-  // Section: delete button
   const deleteSec = e.target.closest('.delete-sec');
   if (deleteSec) { deleteSection(deleteSec.dataset.sectionId); return; }
 
-  // Section name inline rename
   const secName = e.target.closest('.section-name');
   if (secName && !e.target.closest('.section-actions')) {
     startInlineRename(secName); return;
   }
 
-  // Card menu button
   const menuBtn = e.target.closest('.card-menu-btn');
   if (menuBtn) {
     e.stopPropagation();
@@ -456,20 +451,13 @@ document.addEventListener('click', e => {
     return;
   }
 
-  // Context menu actions
-  if (e.target.id === 'ctxEdit') {
-    closeContextMenu();
-    openResourceModal(contextResourceId); return;
-  }
-  if (e.target.id === 'ctxMove') {
+  if (e.target.id === 'ctxEdit')   { closeContextMenu(); openResourceModal(contextResourceId); return; }
+  if (e.target.id === 'ctxMove')   {
     closeContextMenu();
     if (state.sections.length < 2) { alert('You need at least 2 sections to move resources.'); return; }
     openMoveModal(contextResourceId); return;
   }
-  if (e.target.id === 'ctxDelete') {
-    closeContextMenu();
-    deleteResource(contextResourceId); return;
-  }
+  if (e.target.id === 'ctxDelete') { closeContextMenu(); deleteResource(contextResourceId); return; }
 });
 
 /* ==============================
@@ -479,7 +467,6 @@ function startInlineRename(el) {
   const id = el.dataset.sectionId;
   el.contentEditable = 'true';
   el.focus();
-  // Place cursor at end
   const range = document.createRange();
   range.selectNodeContents(el);
   range.collapse(false);
@@ -491,12 +478,12 @@ function startInlineRename(el) {
     el.contentEditable = 'false';
     const newName = el.textContent.trim();
     if (newName) renameSection(id, newName);
-    else render(); // restore
+    else render();
     el.removeEventListener('blur', finish);
     el.removeEventListener('keydown', onKey);
   }
   function onKey(ev) {
-    if (ev.key === 'Enter') { ev.preventDefault(); finish(); }
+    if (ev.key === 'Enter')  { ev.preventDefault(); finish(); }
     if (ev.key === 'Escape') { el.contentEditable = 'false'; render(); }
   }
   el.addEventListener('blur', finish);
@@ -507,19 +494,17 @@ function startInlineRename(el) {
    SAVE RESOURCE
    ============================== */
 document.getElementById('saveResourceBtn').addEventListener('click', () => {
-  const name = document.getElementById('resName').value.trim();
-  const url  = document.getElementById('resUrl').value.trim();
-  const desc = document.getElementById('resDesc').value.trim();
-  const tags = document.getElementById('resTags').value.trim();
+  const name      = document.getElementById('resName').value.trim();
+  const url       = document.getElementById('resUrl').value.trim();
+  const desc      = document.getElementById('resDesc').value.trim();
+  const tags      = document.getElementById('resTags').value.trim();
   const sectionId = document.getElementById('resSection').value;
 
-  if (!name) { document.getElementById('resName').focus(); return; }
-  if (!url)  { document.getElementById('resUrl').focus(); return; }
+  if (!name)      { document.getElementById('resName').focus(); return; }
+  if (!url)       { document.getElementById('resUrl').focus(); return; }
   if (!sectionId) { alert('Please select a section.'); return; }
 
-  // Ensure URL has a protocol
   const finalUrl = /^https?:\/\//i.test(url) ? url : 'https://' + url;
-
   const data = { name, url: finalUrl, desc, tags, sectionId };
 
   if (editingResourceId) updateResource(editingResourceId, data);
@@ -528,7 +513,6 @@ document.getElementById('saveResourceBtn').addEventListener('click', () => {
   closeModal('resourceModal');
 });
 
-// Allow Enter key in resource name/url to submit
 ['resName', 'resUrl', 'resDesc', 'resTags'].forEach(id => {
   document.getElementById(id).addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('saveResourceBtn').click();
@@ -541,10 +525,8 @@ document.getElementById('saveResourceBtn').addEventListener('click', () => {
 document.getElementById('saveSectionBtn').addEventListener('click', () => {
   const name = document.getElementById('secName').value.trim();
   if (!name) { document.getElementById('secName').focus(); return; }
-
   if (editingSectionId) renameSection(editingSectionId, name);
   else addSection(name);
-
   closeModal('sectionModal');
 });
 
@@ -567,14 +549,12 @@ document.getElementById('confirmMoveBtn').addEventListener('click', () => {
    KEYBOARD SHORTCUTS
    ============================== */
 document.addEventListener('keydown', e => {
-  // Escape closes any open modal or context menu
   if (e.key === 'Escape') {
     closeContextMenu();
     ['resourceModal', 'sectionModal', 'moveModal'].forEach(id => {
       if (document.getElementById(id).classList.contains('open')) closeModal(id);
     });
   }
-  // Ctrl/Cmd + K → focus search
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
     searchInput.focus();
@@ -585,5 +565,6 @@ document.addEventListener('keydown', e => {
 /* ==============================
    INIT
    ============================== */
+loadTheme();
 loadState();
 render();

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,19 +16,61 @@
   <!-- Header -->
   <header class="site-header">
     <div class="header-inner">
-      <div class="header-title">
-        <span class="header-dot"></span>
-        <h1>Resource Hub</h1>
+
+      <!-- Logo + Title -->
+      <div class="header-brand">
+        <a href="#" class="header-logo-link">
+          <!-- Replace src with your actual logo URL -->
+          <img
+            src="YOUR_LOGO_URL_HERE"
+            alt="Company Logo"
+            class="header-logo"
+            id="companyLogo"
+            onerror="this.style.display='none'; document.getElementById('logoFallback').style.display='flex';"
+          />
+          <!-- Fallback shown if image fails or URL not set -->
+          <div class="logo-fallback" id="logoFallback">
+            <span class="logo-fallback-dot logo-fallback-dot--blue"></span>
+            <span class="logo-fallback-dot logo-fallback-dot--orange"></span>
+          </div>
+        </a>
+        <div class="header-divider"></div>
+        <h1 class="header-title">Resource Hub</h1>
       </div>
+
+      <!-- Actions -->
       <div class="header-actions">
         <div class="search-wrapper">
-          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
           <input type="text" id="searchInput" class="search-input" placeholder="Search resources…" autocomplete="off" />
           <button class="search-clear" id="searchClear" title="Clear search">✕</button>
         </div>
         <button class="btn btn-outline" id="addSectionBtn">+ Section</button>
         <button class="btn btn-accent" id="addResourceBtn">+ Resource</button>
+
+        <!-- Theme Toggle -->
+        <button class="theme-toggle" id="themeToggle" title="Toggle light / dark mode" aria-label="Toggle theme">
+          <!-- Sun (shown in dark mode) -->
+          <svg class="theme-icon theme-icon--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <!-- Moon (shown in light mode) -->
+          <svg class="theme-icon theme-icon--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
       </div>
+
     </div>
   </header>
 
