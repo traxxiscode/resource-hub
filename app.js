@@ -1,17 +1,47 @@
 /* ============================================================
    RESOURCE HUB — app.js
-   All state persisted in localStorage.
+   State stored in Firestore. Edit access protected by hashed key.
    ============================================================ */
 
 'use strict';
 
 /* ==============================
+   FIREBASE CONFIG
+   Replace with your own project config from Firebase Console:
+   https://console.firebase.google.com → Project Settings → Your apps
+   ============================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyA5Tl5nDWZsfnnbm6O1LJII9KcQMkT37uc",
+  authDomain: "resource-hub-966bc.firebaseapp.com",
+  projectId: "resource-hub-966bc",
+  storageBucket: "resource-hub-966bc.firebasestorage.app",
+  messagingSenderId: "506921157050",
+  appId: "1:506921157050:web:4160264248522f3734dd83"
+};
+
+/* ==============================
+   FIRESTORE COLLECTION NAMES
+   ============================== */
+const COL_SECTIONS  = 'sections';
+const COL_RESOURCES = 'resources';
+const COL_CONFIG    = 'config';          // stores { editKeyHash, editKeySalt }
+const CONFIG_DOC    = 'editKey';
+
+/* ==============================
+   AUTH CONSTANTS
+   ============================== */
+const MAX_ATTEMPTS    = 3;
+const SESSION_KEY     = 'resourceHubAuth';  // sessionStorage key
+const SESSION_LOCKED  = 'resourceHubLocked';
+const SESSION_FAILS   = 'resourceHubFails';
+
+/* ==============================
    STATE
    ============================== */
-let state = {
-  sections: [],   // [{ id, name }]
-  resources: []   // [{ id, sectionId, name, url, desc, tags[] }]
-};
+let db;
+let sections  = [];   // [{ id, name, order }]
+let resources = [];   // [{ id, sectionId, name, url, desc, tags[] }]
+let isEditor  = false;
 
 let editingResourceId = null;
 let editingSectionId  = null;
@@ -19,17 +49,246 @@ let contextResourceId = null;
 let contextSectionId  = null;
 
 /* ==============================
-   PERSISTENCE
+   FIREBASE INIT
    ============================== */
-function loadState() {
-  try {
-    const saved = localStorage.getItem('resourceHub');
-    if (saved) state = JSON.parse(saved);
-  } catch (e) { /* fresh start */ }
+async function initFirebase() {
+  const { initializeApp }   = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+  const { getFirestore, collection, doc, getDocs, getDoc,
+          setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
+          orderBy, query, where }  = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+
+  const app = initializeApp(FIREBASE_CONFIG);
+  db = getFirestore(app);
+
+  // Expose Firestore helpers globally for the rest of the module
+  window._fs = { collection, doc, getDocs, getDoc, setDoc, addDoc,
+                 updateDoc, deleteDoc, onSnapshot, orderBy, query, where };
+
+  return db;
 }
 
-function saveState() {
-  localStorage.setItem('resourceHub', JSON.stringify(state));
+/* ==============================
+   CRYPTO HELPERS
+   ============================== */
+async function hashKey(password, salt) {
+  const enc      = new TextEncoder();
+  const keyMat   = await crypto.subtle.importKey('raw', enc.encode(password),
+                     { name: 'PBKDF2' }, false, ['deriveBits']);
+  const bits     = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 200_000, hash: 'SHA-256' },
+    keyMat, 256
+  );
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function generateSalt() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* ==============================
+   AUTH STATE (sessionStorage)
+   ============================== */
+function loadAuthState() {
+  isEditor = sessionStorage.getItem(SESSION_KEY) === 'true';
+}
+
+function setEditor(value) {
+  isEditor = value;
+  sessionStorage.setItem(SESSION_KEY, value ? 'true' : 'false');
+}
+
+function getFailCount() {
+  return parseInt(sessionStorage.getItem(SESSION_FAILS) || '0', 10);
+}
+
+function incFailCount() {
+  const n = getFailCount() + 1;
+  sessionStorage.setItem(SESSION_FAILS, String(n));
+  return n;
+}
+
+function isLocked() {
+  return sessionStorage.getItem(SESSION_LOCKED) === 'true';
+}
+
+function lockOut() {
+  sessionStorage.setItem(SESSION_LOCKED, 'true');
+}
+
+/* ==============================
+   FIRESTORE: LOAD DATA
+   ============================== */
+async function loadData() {
+  const { collection, getDocs, orderBy, query } = window._fs;
+
+  const [secSnap, resSnap] = await Promise.all([
+    getDocs(query(collection(db, COL_SECTIONS),  orderBy('order', 'asc'))),
+    getDocs(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')))
+  ]);
+
+  sections  = secSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  resources = resSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+/* ==============================
+   FIRESTORE: REAL-TIME LISTENER
+   ============================== */
+function subscribeRealtime() {
+  const { collection, onSnapshot, orderBy, query } = window._fs;
+
+  onSnapshot(query(collection(db, COL_SECTIONS), orderBy('order', 'asc')), snap => {
+    sections = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+
+  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')), snap => {
+    resources = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+}
+
+/* ==============================
+   EDIT KEY: CHECK IF SET
+   ============================== */
+async function getEditKeyDoc() {
+  const { doc, getDoc } = window._fs;
+  const snap = await getDoc(doc(db, COL_CONFIG, CONFIG_DOC));
+  return snap.exists() ? snap.data() : null;
+}
+
+/* ==============================
+   EDIT KEY: VERIFY
+   ============================== */
+async function verifyEditKey(input) {
+  const keyDoc = await getEditKeyDoc();
+  if (!keyDoc) return false;
+  const hash = await hashKey(input, keyDoc.salt);
+  return hash === keyDoc.hash;
+}
+
+/* ==============================
+   EDIT KEY: SAVE (first-time setup or change)
+   ============================== */
+async function saveEditKey(password) {
+  const { doc, setDoc } = window._fs;
+  const salt = generateSalt();
+  const hash = await hashKey(password, salt);
+  await setDoc(doc(db, COL_CONFIG, CONFIG_DOC), { hash, salt });
+}
+
+/* ==============================
+   AUTH MODAL LOGIC
+   ============================== */
+function openAuthModal(isSetup = false) {
+  const modal   = document.getElementById('authModal');
+  const title   = document.getElementById('authModalTitle');
+  const body    = document.getElementById('authModalBody');
+  const hint    = document.getElementById('authHint');
+  const input   = document.getElementById('authKeyInput');
+  const saveBtn = document.getElementById('authSaveBtn');
+  const locked  = isLocked();
+
+  if (locked) {
+    title.textContent = '🔒 Locked Out';
+    body.innerHTML = `<p style="color:var(--text-muted);font-size:15px;">Too many failed attempts. Close this tab or clear session storage to try again.</p>`;
+    saveBtn.style.display = 'none';
+    modal.classList.add('open');
+    return;
+  }
+
+  const remaining = MAX_ATTEMPTS - getFailCount();
+
+  if (isSetup) {
+    title.textContent = 'Set Edit Key';
+    hint.textContent  = 'No edit key exists yet. Set one to enable editing.';
+    hint.style.display = '';
+    saveBtn.textContent = 'Set Key';
+    input.placeholder   = 'Choose a secure passphrase…';
+  } else {
+    title.textContent = 'Enter Edit Key';
+    hint.textContent  = `${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`;
+    hint.style.display = '';
+    saveBtn.textContent = 'Unlock';
+    input.placeholder   = 'Enter edit key…';
+  }
+
+  saveBtn.style.display = '';
+  saveBtn.dataset.mode  = isSetup ? 'setup' : 'verify';
+  input.value = '';
+  input.type  = 'password';
+  modal.classList.add('open');
+  setTimeout(() => input.focus(), 60);
+}
+
+function closeAuthModal() {
+  document.getElementById('authModal').classList.remove('open');
+}
+
+async function handleAuthSave() {
+  const input   = document.getElementById('authKeyInput');
+  const errEl   = document.getElementById('authError');
+  const saveBtn = document.getElementById('authSaveBtn');
+  const mode    = saveBtn.dataset.mode;
+  const value   = input.value.trim();
+
+  errEl.textContent = '';
+  if (!value) { errEl.textContent = 'Please enter a key.'; return; }
+
+  saveBtn.disabled    = true;
+  saveBtn.textContent = 'Checking…';
+
+  if (mode === 'setup') {
+    await saveEditKey(value);
+    setEditor(true);
+    closeAuthModal();
+    renderEditKeyBtn();
+    render();
+  } else {
+    const ok = await verifyEditKey(value);
+    if (ok) {
+      setEditor(true);
+      sessionStorage.removeItem(SESSION_FAILS);
+      closeAuthModal();
+      renderEditKeyBtn();
+      render();
+    } else {
+      const fails = incFailCount();
+      if (fails >= MAX_ATTEMPTS) {
+        lockOut();
+        errEl.textContent = 'Too many failed attempts. You are locked out.';
+        saveBtn.style.display = 'none';
+        input.disabled = true;
+      } else {
+        const rem = MAX_ATTEMPTS - fails;
+        errEl.textContent = `Incorrect key. ${rem} attempt${rem !== 1 ? 's' : ''} remaining.`;
+        document.getElementById('authHint').textContent = `${rem} attempt${rem !== 1 ? 's' : ''} remaining.`;
+      }
+    }
+  }
+
+  saveBtn.disabled    = false;
+  saveBtn.textContent = mode === 'setup' ? 'Set Key' : 'Unlock';
+}
+
+/* ==============================
+   EDIT KEY BUTTON (header)
+   ============================== */
+function renderEditKeyBtn() {
+  const btn = document.getElementById('editKeyBtn');
+  if (!btn) return;
+
+  if (isEditor) {
+    btn.textContent = '🔓 Editor Mode';
+    btn.classList.remove('btn-outline');
+    btn.classList.add('btn-accent-dim');
+    btn.title = 'Click to lock / sign out of editor mode';
+  } else {
+    btn.textContent = '🔑 Edit Key';
+    btn.classList.add('btn-outline');
+    btn.classList.remove('btn-accent-dim');
+    btn.title = 'Enter edit key to enable editing';
+  }
 }
 
 /* ==============================
@@ -60,9 +319,7 @@ function getFavicon(url) {
   try {
     const domain = new URL(url).hostname;
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function getDomain(url) {
@@ -84,21 +341,28 @@ function render() {
   const main  = document.getElementById('mainContent');
   const empty = document.getElementById('emptyState');
 
-  // Clear non-empty-state children
   [...main.children].forEach(c => { if (c !== empty) c.remove(); });
 
-  if (state.sections.length === 0 && !query) {
+  // Update empty state text based on editor mode
+  document.getElementById('emptyActionsEditor').style.display  = isEditor ? 'flex' : 'none';
+  document.getElementById('emptyActionsViewer').style.display  = isEditor ? 'none' : 'flex';
+
+  // Show/hide editor-only header buttons
+  document.getElementById('addSectionBtn').style.display   = isEditor ? '' : 'none';
+  document.getElementById('addResourceBtn').style.display  = isEditor ? '' : 'none';
+
+  if (sections.length === 0 && !query) {
     empty.classList.remove('hidden');
     return;
   }
   empty.classList.add('hidden');
 
-  if (state.sections.length === 0) return;
+  if (sections.length === 0) return;
 
   let totalVisible = 0;
 
-  state.sections.forEach(sec => {
-    const secResources = state.resources.filter(r => r.sectionId === sec.id);
+  sections.forEach(sec => {
+    const secResources = resources.filter(r => r.sectionId === sec.id);
 
     const filtered = query
       ? secResources.filter(r =>
@@ -117,15 +381,18 @@ function render() {
     block.className = 'section-block';
     block.dataset.sectionId = sec.id;
 
+    const sectionActions = isEditor ? `
+      <div class="section-actions">
+        <button class="btn btn-sm btn-outline add-res-to-sec" data-section-id="${sec.id}">+ Resource</button>
+        <button class="btn-icon rename-sec" data-section-id="${sec.id}" title="Rename section">✎</button>
+        <button class="btn-icon delete-sec" data-section-id="${sec.id}" title="Delete section">✕</button>
+      </div>` : '';
+
     block.innerHTML = `
       <div class="section-header">
-        <span class="section-name" data-section-id="${sec.id}" title="Click to rename">${esc(sec.name)}</span>
+        <span class="section-name" data-section-id="${sec.id}" title="${isEditor ? 'Click to rename' : ''}">${esc(sec.name)}</span>
         <span class="section-count">${filtered.length}</span>
-        <div class="section-actions">
-          <button class="btn btn-sm btn-outline add-res-to-sec" data-section-id="${sec.id}">+ Resource</button>
-          <button class="btn-icon rename-sec" data-section-id="${sec.id}" title="Rename section">✎</button>
-          <button class="btn-icon delete-sec" data-section-id="${sec.id}" title="Delete section">✕</button>
-        </div>
+        ${sectionActions}
       </div>
       <div class="resource-grid" id="grid-${sec.id}"></div>
     `;
@@ -150,7 +417,6 @@ function render() {
 }
 
 function buildCard(r, index) {
-  // The entire card is an <a> that opens the link
   const card = document.createElement('a');
   card.className = 'resource-card';
   card.href = r.url;
@@ -171,6 +437,10 @@ function buildCard(r, index) {
     ? `<p class="card-desc">${esc(r.desc)}</p>`
     : '';
 
+  const menuBtn = isEditor
+    ? `<button class="card-menu-btn" data-resource-id="${r.id}" title="Options">⋯</button>`
+    : '';
+
   card.innerHTML = `
     <div class="card-top">
       <div class="card-favicon">
@@ -186,84 +456,91 @@ function buildCard(r, index) {
     </div>
     ${descHtml}
     ${tagsHtml}
-    <div class="card-footer">
-      <button class="card-menu-btn" data-resource-id="${r.id}" title="Options">⋯</button>
-    </div>
+    ${menuBtn ? `<div class="card-footer">${menuBtn}</div>` : ''}
   `;
 
   return card;
 }
 
 /* ==============================
-   SECTIONS
+   SECTIONS (Firestore)
    ============================== */
-function addSection(name) {
-  const sec = { id: uid(), name: name.trim() };
-  state.sections.push(sec);
-  saveState();
-  render();
-  return sec;
+async function addSection(name) {
+  if (!isEditor) return;
+  const { collection, addDoc } = window._fs;
+  await addDoc(collection(db, COL_SECTIONS), {
+    name: name.trim(),
+    order: sections.length,
+    createdAt: Date.now()
+  });
 }
 
-function renameSection(id, name) {
-  const sec = state.sections.find(s => s.id === id);
-  if (sec) { sec.name = name.trim(); saveState(); render(); }
+async function renameSection(id, name) {
+  if (!isEditor) return;
+  const { doc, updateDoc } = window._fs;
+  await updateDoc(doc(db, COL_SECTIONS, id), { name: name.trim() });
 }
 
-function deleteSection(id) {
+async function deleteSection(id) {
+  if (!isEditor) return;
   if (!confirm('Delete this section and all its resources?')) return;
-  state.sections  = state.sections.filter(s => s.id !== id);
-  state.resources = state.resources.filter(r => r.sectionId !== id);
-  saveState();
-  render();
+  const { doc, deleteDoc, collection, getDocs, query: fsQuery, where } = window._fs;
+
+  // Delete all resources in this section
+  const resSnap = await getDocs(
+    fsQuery(collection(db, COL_RESOURCES), where('sectionId', '==', id))
+  );
+  await Promise.all(resSnap.docs.map(d => deleteDoc(doc(db, COL_RESOURCES, d.id))));
+  await deleteDoc(doc(db, COL_SECTIONS, id));
 }
 
 /* ==============================
-   RESOURCES
+   RESOURCES (Firestore)
    ============================== */
-function addResource(data) {
-  const r = {
-    id: uid(),
+async function addResource(data) {
+  if (!isEditor) return;
+  const { collection, addDoc } = window._fs;
+  await addDoc(collection(db, COL_RESOURCES), {
+    sectionId: data.sectionId,
+    name: data.name.trim(),
+    url:  data.url.trim(),
+    desc: data.desc ? data.desc.trim() : '',
+    tags: data.tags ? data.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+    createdAt: Date.now()
+  });
+}
+
+async function updateResource(id, data) {
+  if (!isEditor) return;
+  const { doc, updateDoc } = window._fs;
+  await updateDoc(doc(db, COL_RESOURCES, id), {
     sectionId: data.sectionId,
     name: data.name.trim(),
     url:  data.url.trim(),
     desc: data.desc ? data.desc.trim() : '',
     tags: data.tags ? data.tags.split(',').map(t => t.trim()).filter(Boolean) : []
-  };
-  state.resources.push(r);
-  saveState();
-  render();
+  });
 }
 
-function updateResource(id, data) {
-  const r = state.resources.find(r => r.id === id);
-  if (!r) return;
-  r.sectionId = data.sectionId;
-  r.name = data.name.trim();
-  r.url  = data.url.trim();
-  r.desc = data.desc ? data.desc.trim() : '';
-  r.tags = data.tags ? data.tags.split(',').map(t => t.trim()).filter(Boolean) : [];
-  saveState();
-  render();
-}
-
-function deleteResource(id) {
+async function deleteResource(id) {
+  if (!isEditor) return;
   if (!confirm('Delete this resource?')) return;
-  state.resources = state.resources.filter(r => r.id !== id);
-  saveState();
-  render();
+  const { doc, deleteDoc } = window._fs;
+  await deleteDoc(doc(db, COL_RESOURCES, id));
 }
 
-function moveOrCopyResource(resourceId, targetSectionId, action) {
-  const r = state.resources.find(r => r.id === resourceId);
+async function moveOrCopyResource(resourceId, targetSectionId, action) {
+  if (!isEditor) return;
+  const { doc, updateDoc, addDoc, collection } = window._fs;
+  const r = resources.find(r => r.id === resourceId);
   if (!r) return;
+
   if (action === 'move') {
-    r.sectionId = targetSectionId;
+    await updateDoc(doc(db, COL_RESOURCES, resourceId), { sectionId: targetSectionId });
   } else {
-    state.resources.push({ ...r, id: uid(), sectionId: targetSectionId });
+    const { id: _id, ...rest } = r;
+    await addDoc(collection(db, COL_RESOURCES), { ...rest, sectionId: targetSectionId, createdAt: Date.now() });
   }
-  saveState();
-  render();
 }
 
 /* ==============================
@@ -275,7 +552,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 function populateSectionSelect(selectId, excludeId = null) {
   const sel = document.getElementById(selectId);
   sel.innerHTML = '';
-  state.sections.forEach(sec => {
+  sections.forEach(sec => {
     if (sec.id === excludeId) return;
     const opt = document.createElement('option');
     opt.value = sec.id;
@@ -288,6 +565,7 @@ function populateSectionSelect(selectId, excludeId = null) {
    OPEN RESOURCE MODAL
    ============================== */
 function openResourceModal(resourceId = null, defaultSectionId = null) {
+  if (!isEditor) return;
   const titleEl = document.getElementById('resourceModalTitle');
   const nameEl  = document.getElementById('resName');
   const urlEl   = document.getElementById('resUrl');
@@ -299,7 +577,7 @@ function openResourceModal(resourceId = null, defaultSectionId = null) {
   populateSectionSelect('resSection');
 
   if (resourceId) {
-    const r = state.resources.find(r => r.id === resourceId);
+    const r = resources.find(r => r.id === resourceId);
     titleEl.textContent = 'Edit Resource';
     nameEl.value = r.name;
     urlEl.value  = r.url;
@@ -323,12 +601,13 @@ function openResourceModal(resourceId = null, defaultSectionId = null) {
    OPEN SECTION MODAL
    ============================== */
 function openSectionModal(sectionId = null) {
+  if (!isEditor) return;
   const titleEl = document.getElementById('sectionModalTitle');
   const nameEl  = document.getElementById('secName');
   editingSectionId = sectionId;
 
   if (sectionId) {
-    const sec = state.sections.find(s => s.id === sectionId);
+    const sec = sections.find(s => s.id === sectionId);
     titleEl.textContent = 'Rename Section';
     nameEl.value = sec.name;
   } else {
@@ -344,13 +623,14 @@ function openSectionModal(sectionId = null) {
    OPEN MOVE MODAL
    ============================== */
 function openMoveModal(resourceId) {
-  const r = state.resources.find(r => r.id === resourceId);
+  if (!isEditor) return;
+  const r = resources.find(r => r.id === resourceId);
   if (!r) return;
   contextResourceId = resourceId;
 
   document.getElementById('moveResourceName').textContent = `"${r.name}"`;
   populateSectionSelect('moveTarget', null);
-  const otherSec = state.sections.find(s => s.id !== r.sectionId);
+  const otherSec = sections.find(s => s.id !== r.sectionId);
   if (otherSec) document.getElementById('moveTarget').value = otherSec.id;
 
   document.querySelector('input[name="moveAction"][value="move"]').checked = true;
@@ -361,8 +641,9 @@ function openMoveModal(resourceId) {
    CONTEXT MENU
    ============================== */
 function openContextMenu(resourceId, x, y) {
+  if (!isEditor) return;
   contextResourceId = resourceId;
-  const r = state.resources.find(r => r.id === resourceId);
+  const r = resources.find(r => r.id === resourceId);
   contextSectionId  = r ? r.sectionId : null;
 
   const menu = document.getElementById('contextMenu');
@@ -412,36 +693,49 @@ document.addEventListener('click', e => {
     closeModal(e.target.id); return;
   }
 
+  // Edit Key button
+  if (e.target.id === 'editKeyBtn') {
+    if (isEditor) {
+      // Lock / sign out
+      setEditor(false);
+      sessionStorage.removeItem(SESSION_FAILS);
+      renderEditKeyBtn();
+      render();
+    } else {
+      handleAuthFlow();
+    }
+    return;
+  }
+
+  if (e.target.id === 'authSaveBtn') { handleAuthSave(); return; }
+
   if (e.target.id === 'addSectionBtn' || e.target.id === 'emptyAddSectionBtn') {
+    if (!isEditor) return;
     openSectionModal(); return;
   }
 
   if (e.target.id === 'addResourceBtn' || e.target.id === 'emptyAddResourceBtn') {
-    if (state.sections.length === 0) {
-      alert('Please add a section first.');
-      openSectionModal();
-      return;
-    }
+    if (!isEditor) return;
+    if (sections.length === 0) { alert('Please add a section first.'); openSectionModal(); return; }
     openResourceModal(); return;
   }
 
   const addToSec = e.target.closest('.add-res-to-sec');
-  if (addToSec) { openResourceModal(null, addToSec.dataset.sectionId); return; }
+  if (addToSec && isEditor) { openResourceModal(null, addToSec.dataset.sectionId); return; }
 
   const renameSec = e.target.closest('.rename-sec');
-  if (renameSec) { openSectionModal(renameSec.dataset.sectionId); return; }
+  if (renameSec && isEditor) { openSectionModal(renameSec.dataset.sectionId); return; }
 
   const deleteSec = e.target.closest('.delete-sec');
-  if (deleteSec) { deleteSection(deleteSec.dataset.sectionId); return; }
+  if (deleteSec && isEditor) { deleteSection(deleteSec.dataset.sectionId); return; }
 
   const secName = e.target.closest('.section-name');
-  if (secName && !e.target.closest('.section-actions')) {
+  if (secName && isEditor && !e.target.closest('.section-actions')) {
     startInlineRename(secName); return;
   }
 
-  // Card menu button — stop propagation so the <a> card doesn't navigate
   const menuBtn = e.target.closest('.card-menu-btn');
-  if (menuBtn) {
+  if (menuBtn && isEditor) {
     e.preventDefault();
     e.stopPropagation();
     const rect = menuBtn.getBoundingClientRect();
@@ -449,19 +743,28 @@ document.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.id === 'ctxEdit')   { closeContextMenu(); openResourceModal(contextResourceId); return; }
-  if (e.target.id === 'ctxMove')   {
+  if (e.target.id === 'ctxEdit'  && isEditor) { closeContextMenu(); openResourceModal(contextResourceId); return; }
+  if (e.target.id === 'ctxMove'  && isEditor) {
     closeContextMenu();
-    if (state.sections.length < 2) { alert('You need at least 2 sections to move resources.'); return; }
+    if (sections.length < 2) { alert('You need at least 2 sections to move resources.'); return; }
     openMoveModal(contextResourceId); return;
   }
-  if (e.target.id === 'ctxDelete') { closeContextMenu(); deleteResource(contextResourceId); return; }
+  if (e.target.id === 'ctxDelete' && isEditor) { closeContextMenu(); deleteResource(contextResourceId); return; }
 });
+
+/* ==============================
+   AUTH FLOW (check if key exists first)
+   ============================== */
+async function handleAuthFlow() {
+  const keyDoc = await getEditKeyDoc();
+  openAuthModal(!keyDoc);
+}
 
 /* ==============================
    INLINE SECTION RENAME
    ============================== */
 function startInlineRename(el) {
+  if (!isEditor) return;
   const id = el.dataset.sectionId;
   el.contentEditable = 'true';
   el.focus();
@@ -491,7 +794,8 @@ function startInlineRename(el) {
 /* ==============================
    SAVE RESOURCE
    ============================== */
-document.getElementById('saveResourceBtn').addEventListener('click', () => {
+document.getElementById('saveResourceBtn').addEventListener('click', async () => {
+  if (!isEditor) return;
   const name      = document.getElementById('resName').value.trim();
   const url       = document.getElementById('resUrl').value.trim();
   const desc      = document.getElementById('resDesc').value.trim();
@@ -505,9 +809,13 @@ document.getElementById('saveResourceBtn').addEventListener('click', () => {
   const finalUrl = /^https?:\/\//i.test(url) ? url : 'https://' + url;
   const data = { name, url: finalUrl, desc, tags, sectionId };
 
-  if (editingResourceId) updateResource(editingResourceId, data);
-  else addResource(data);
+  const btn = document.getElementById('saveResourceBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
 
+  if (editingResourceId) await updateResource(editingResourceId, data);
+  else await addResource(data);
+
+  btn.disabled = false; btn.textContent = 'Save Resource';
   closeModal('resourceModal');
 });
 
@@ -520,11 +828,18 @@ document.getElementById('saveResourceBtn').addEventListener('click', () => {
 /* ==============================
    SAVE SECTION
    ============================== */
-document.getElementById('saveSectionBtn').addEventListener('click', () => {
+document.getElementById('saveSectionBtn').addEventListener('click', async () => {
+  if (!isEditor) return;
   const name = document.getElementById('secName').value.trim();
   if (!name) { document.getElementById('secName').focus(); return; }
-  if (editingSectionId) renameSection(editingSectionId, name);
-  else addSection(name);
+
+  const btn = document.getElementById('saveSectionBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  if (editingSectionId) await renameSection(editingSectionId, name);
+  else await addSection(name);
+
+  btn.disabled = false; btn.textContent = 'Save Section';
   closeModal('sectionModal');
 });
 
@@ -535,12 +850,20 @@ document.getElementById('secName').addEventListener('keydown', e => {
 /* ==============================
    CONFIRM MOVE / COPY
    ============================== */
-document.getElementById('confirmMoveBtn').addEventListener('click', () => {
+document.getElementById('confirmMoveBtn').addEventListener('click', async () => {
+  if (!isEditor) return;
   const targetSectionId = document.getElementById('moveTarget').value;
   const action = document.querySelector('input[name="moveAction"]:checked').value;
   if (!targetSectionId) return;
-  moveOrCopyResource(contextResourceId, targetSectionId, action);
+  await moveOrCopyResource(contextResourceId, targetSectionId, action);
   closeModal('moveModal');
+});
+
+/* ==============================
+   AUTH MODAL: Enter key
+   ============================== */
+document.getElementById('authKeyInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('authSaveBtn').click();
 });
 
 /* ==============================
@@ -549,7 +872,7 @@ document.getElementById('confirmMoveBtn').addEventListener('click', () => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeContextMenu();
-    ['resourceModal', 'sectionModal', 'moveModal'].forEach(id => {
+    ['resourceModal', 'sectionModal', 'moveModal', 'authModal'].forEach(id => {
       if (document.getElementById(id).classList.contains('open')) closeModal(id);
     });
   }
@@ -561,8 +884,42 @@ document.addEventListener('keydown', e => {
 });
 
 /* ==============================
+   LOADING OVERLAY
+   ============================== */
+function showLoading() {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').style.display = 'none';
+}
+
+/* ==============================
    INIT
    ============================== */
-loadTheme();
-loadState();
-render();
+async function init() {
+  loadTheme();
+  loadAuthState();
+
+  showLoading();
+
+  try {
+    await initFirebase();
+    await loadData();
+    subscribeRealtime();
+  } catch (err) {
+    console.error('Firebase init error:', err);
+    document.getElementById('loadingOverlay').innerHTML =
+      `<div style="color:var(--danger);text-align:center;padding:20px;">
+        <p style="font-size:1.2rem;font-weight:700;">⚠ Firebase connection failed</p>
+        <p style="color:var(--text-muted);margin-top:8px;font-size:14px;">${err.message}</p>
+        <p style="color:var(--text-dim);margin-top:8px;font-size:13px;">Check your FIREBASE_CONFIG in app.js</p>
+      </div>`;
+    return;
+  }
+
+  hideLoading();
+  renderEditKeyBtn();
+  render();
+}
+
+init();

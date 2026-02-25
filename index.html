@@ -13,14 +13,24 @@
   <!-- Grain overlay -->
   <div class="grain"></div>
 
+  <!-- Loading overlay -->
+  <div id="loadingOverlay" style="
+    position:fixed;inset:0;z-index:9998;
+    background:var(--bg);
+    display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:16px;
+  ">
+    <div style="width:40px;height:40px;border:3px solid var(--border2);border-top-color:var(--blue);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+    <p style="color:var(--text-muted);font-size:15px;">Connecting to database…</p>
+  </div>
+
   <!-- Header -->
   <header class="site-header">
     <div class="header-inner">
 
-      <!-- Logo + Title (logo is NOT clickable) -->
+      <!-- Logo + Title -->
       <div class="header-brand">
         <div class="header-logo-wrap">
-          <!-- Replace src with your actual logo URL -->
           <img
             src="https://traxxisgps.com/wp-content/uploads/elementor/thumbs/Traxxis-refresh-logo_horizontal-min-1-qjgvd5cr9kxu5eay6trn10pbylz31ardqnqdluuew0.webp"
             alt="Company Logo"
@@ -28,7 +38,6 @@
             id="companyLogo"
             onerror="this.style.display='none'; document.getElementById('logoFallback').style.display='flex';"
           />
-          <!-- Fallback shown if image fails or URL not set -->
           <div class="logo-fallback" id="logoFallback">
             <span class="logo-fallback-dot logo-fallback-dot--blue"></span>
             <span class="logo-fallback-dot logo-fallback-dot--orange"></span>
@@ -47,12 +56,16 @@
           <input type="text" id="searchInput" class="search-input" placeholder="Search resources…" autocomplete="off" />
           <button class="search-clear" id="searchClear" title="Clear search">✕</button>
         </div>
-        <button class="btn btn-outline" id="addSectionBtn">+ Section</button>
-        <button class="btn btn-accent" id="addResourceBtn">+ Resource</button>
+
+        <!-- Editor-only buttons (hidden for viewers) -->
+        <button class="btn btn-outline" id="addSectionBtn" style="display:none;">+ Section</button>
+        <button class="btn btn-accent" id="addResourceBtn" style="display:none;">+ Resource</button>
+
+        <!-- Edit Key toggle -->
+        <button class="btn btn-outline" id="editKeyBtn">🔑 Edit Key</button>
 
         <!-- Theme Toggle -->
         <button class="theme-toggle" id="themeToggle" title="Toggle light / dark mode" aria-label="Toggle theme">
-          <!-- Sun (visible in dark mode) -->
           <svg class="theme-icon theme-icon--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="5"/>
             <line x1="12" y1="1" x2="12" y2="3"/>
@@ -64,7 +77,6 @@
             <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
             <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
           </svg>
-          <!-- Moon (visible in light mode) -->
           <svg class="theme-icon theme-icon--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
           </svg>
@@ -80,12 +92,39 @@
       <div class="empty-icon">◈</div>
       <p class="empty-title">Nothing here yet</p>
       <p class="empty-sub">Add a section to get started, then fill it with resources.</p>
-      <div class="empty-actions">
+
+      <!-- Shown when editor -->
+      <div class="empty-actions" id="emptyActionsEditor" style="display:none;">
         <button class="btn btn-outline" id="emptyAddSectionBtn">+ Add Section</button>
         <button class="btn btn-accent" id="emptyAddResourceBtn">+ Add Resource</button>
       </div>
+
+      <!-- Shown when viewer -->
+      <div class="empty-actions" id="emptyActionsViewer" style="display:flex;">
+        <button class="btn btn-outline" id="emptyEditKeyBtn" onclick="document.getElementById('editKeyBtn').click()">🔑 Enter Edit Key to add resources</button>
+      </div>
     </div>
   </main>
+
+  <!-- ===== MODAL: Auth / Edit Key ===== -->
+  <div class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <div class="modal modal--sm">
+      <div class="modal-header">
+        <h2 class="modal-title" id="authModalTitle">Enter Edit Key</h2>
+        <button class="modal-close" data-close="authModal">✕</button>
+      </div>
+      <div class="modal-body" id="authModalBody">
+        <p class="modal-subtext" id="authHint" style="display:none;"></p>
+        <label class="field-label" for="authKeyInput">Edit Key</label>
+        <input type="password" id="authKeyInput" class="field-input" placeholder="Enter edit key…" autocomplete="current-password" />
+        <p id="authError" style="color:var(--danger);font-size:13px;min-height:18px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="authModal">Cancel</button>
+        <button class="btn btn-accent" id="authSaveBtn">Unlock</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ===== MODAL: Add / Edit Resource ===== -->
   <div class="modal-backdrop" id="resourceModal" role="dialog" aria-modal="true" aria-labelledby="resourceModalTitle">
@@ -165,6 +204,28 @@
     <button class="ctx-item ctx-danger" id="ctxDelete">✕ Delete</button>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js" type="module"></script>
+
+  <style>
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Editor mode button accent */
+    .btn-accent-dim {
+      background: var(--surface3);
+      border: 1.5px solid var(--blue);
+      color: var(--blue);
+      font-weight: 600;
+      font-size: 15px;
+      padding: 10px 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background var(--transition), box-shadow var(--transition);
+    }
+    .btn-accent-dim:hover {
+      background: var(--blue-dim);
+      box-shadow: 0 0 14px var(--blue-glow);
+    }
+  </style>
 </body>
 </html>
