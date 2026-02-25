@@ -150,8 +150,12 @@ function render() {
 }
 
 function buildCard(r, index) {
-  const card = document.createElement('div');
+  // The entire card is an <a> that opens the link
+  const card = document.createElement('a');
   card.className = 'resource-card';
+  card.href = r.url;
+  card.target = '_blank';
+  card.rel = 'noopener noreferrer';
   card.dataset.resourceId = r.id;
   card.style.animationDelay = `${index * 30}ms`;
 
@@ -183,14 +187,6 @@ function buildCard(r, index) {
     ${descHtml}
     ${tagsHtml}
     <div class="card-footer">
-      <a class="card-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">
-        Open
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-          <polyline points="15 3 21 3 21 9"/>
-          <line x1="10" y1="14" x2="21" y2="3"/>
-        </svg>
-      </a>
       <button class="card-menu-btn" data-resource-id="${r.id}" title="Options">⋯</button>
     </div>
   `;
@@ -443,11 +439,13 @@ document.addEventListener('click', e => {
     startInlineRename(secName); return;
   }
 
+  // Card menu button — stop propagation so the <a> card doesn't navigate
   const menuBtn = e.target.closest('.card-menu-btn');
   if (menuBtn) {
+    e.preventDefault();
     e.stopPropagation();
     const rect = menuBtn.getBoundingClientRect();
-    openContextMenu(menuBtn.dataset.resourceId, rect.left, rect.bottom + 4);
+    openContextMenu(menuBtn.dataset.resourceId, rect.left, rect.bottom + 6);
     return;
   }
 
