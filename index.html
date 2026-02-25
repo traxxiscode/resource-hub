@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resource Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Grain overlay -->
+  <div class="grain"></div>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-title">
+        <span class="header-dot"></span>
+        <h1>Resource Hub</h1>
+      </div>
+      <div class="header-actions">
+        <div class="search-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="searchInput" class="search-input" placeholder="Search resources…" autocomplete="off" />
+          <button class="search-clear" id="searchClear" title="Clear search">✕</button>
+        </div>
+        <button class="btn btn-outline" id="addSectionBtn">+ Section</button>
+        <button class="btn btn-accent" id="addResourceBtn">+ Resource</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="main-content" id="mainContent">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">◈</div>
+      <p class="empty-title">Nothing here yet</p>
+      <p class="empty-sub">Add a section to get started, then fill it with resources.</p>
+      <div class="empty-actions">
+        <button class="btn btn-outline" id="emptyAddSectionBtn">+ Add Section</button>
+        <button class="btn btn-accent" id="emptyAddResourceBtn">+ Add Resource</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== MODAL: Add / Edit Resource ===== -->
+  <div class="modal-backdrop" id="resourceModal" role="dialog" aria-modal="true" aria-labelledby="resourceModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="resourceModalTitle">Add Resource</h2>
+        <button class="modal-close" data-close="resourceModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label" for="resName">Name</label>
+        <input type="text" id="resName" class="field-input" placeholder="e.g. MDN Web Docs" />
+
+        <label class="field-label" for="resUrl">URL</label>
+        <input type="url" id="resUrl" class="field-input" placeholder="https://…" />
+
+        <label class="field-label" for="resDesc">Description <span class="field-optional">(optional)</span></label>
+        <input type="text" id="resDesc" class="field-input" placeholder="Short description…" />
+
+        <label class="field-label" for="resTags">Tags <span class="field-optional">(comma separated, optional)</span></label>
+        <input type="text" id="resTags" class="field-input" placeholder="e.g. docs, reference, css" />
+
+        <label class="field-label" for="resSection">Section</label>
+        <select id="resSection" class="field-select"></select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="resourceModal">Cancel</button>
+        <button class="btn btn-accent" id="saveResourceBtn">Save Resource</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: Add / Edit Section ===== -->
+  <div class="modal-backdrop" id="sectionModal" role="dialog" aria-modal="true" aria-labelledby="sectionModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="sectionModalTitle">Add Section</h2>
+        <button class="modal-close" data-close="sectionModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label" for="secName">Section Name</label>
+        <input type="text" id="secName" class="field-input" placeholder="e.g. Design Tools" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="sectionModal">Cancel</button>
+        <button class="btn btn-accent" id="saveSectionBtn">Save Section</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: Move / Copy Resource ===== -->
+  <div class="modal-backdrop" id="moveModal" role="dialog" aria-modal="true" aria-labelledby="moveModalTitle">
+    <div class="modal modal--sm">
+      <div class="modal-header">
+        <h2 class="modal-title" id="moveModalTitle">Move / Copy Resource</h2>
+        <button class="modal-close" data-close="moveModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-subtext" id="moveResourceName"></p>
+        <label class="field-label" for="moveTarget">Target Section</label>
+        <select id="moveTarget" class="field-select"></select>
+        <div class="move-options">
+          <label class="radio-label"><input type="radio" name="moveAction" value="move" checked /> Move (remove from current section)</label>
+          <label class="radio-label"><input type="radio" name="moveAction" value="copy" /> Copy (keep in current section)</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="moveModal">Cancel</button>
+        <button class="btn btn-accent" id="confirmMoveBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CONTEXT MENU ===== -->
+  <div class="context-menu" id="contextMenu">
+    <button class="ctx-item" id="ctxEdit">✎ Edit</button>
+    <button class="ctx-item" id="ctxMove">⇄ Move / Copy</button>
+    <button class="ctx-item ctx-danger" id="ctxDelete">✕ Delete</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
