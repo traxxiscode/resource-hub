@@ -131,8 +131,8 @@ async function loadData() {
   const { collection, getDocs, orderBy, query } = window._fs;
 
   const [secSnap, resSnap] = await Promise.all([
-    getDocs(query(collection(db, COL_SECTIONS),  orderBy('order',     'asc'))),
-    getDocs(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')))
+    getDocs(query(collection(db, COL_SECTIONS),  orderBy('order', 'asc'))),
+    getDocs(query(collection(db, COL_RESOURCES), orderBy('order', 'asc')))
   ]);
 
   sections  = secSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -140,7 +140,7 @@ async function loadData() {
 
   // Groups collection may not exist yet — don't let it block the rest
   try {
-    const grpSnap = await getDocs(query(collection(db, COL_GROUPS), orderBy('createdAt', 'asc')));
+    const grpSnap = await getDocs(query(collection(db, COL_GROUPS), orderBy('order', 'asc')));
     groups = grpSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
     groups = [];
@@ -158,12 +158,12 @@ function subscribeRealtime() {
     render();
   });
 
-  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')), snap => {
+  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('order', 'asc')), snap => {
     resources = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   });
 
-  onSnapshot(query(collection(db, COL_GROUPS), orderBy('createdAt', 'asc')), snap => {
+  onSnapshot(query(collection(db, COL_GROUPS), orderBy('order', 'asc')), snap => {
     groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   }, () => { groups = []; });
