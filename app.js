@@ -51,7 +51,7 @@ let editingGroupId    = null;
 let contextResourceId = null;
 let contextSectionId  = null;
 
-// Drag state managed by pointer-event drag system (see startCardDrag)
+// Drag & drop handled by SortableJS (see setupGridDrag)
 
 /* ==============================
    FIREBASE INIT
@@ -492,7 +492,7 @@ function buildCard(r, index) {
     : '';
 
   const dragHandle = isEditor
-    ? `<span class="drag-handle" title="Drag to reorder">⠿</span>`
+    ? `<span class="drag-handle sortable-handle" title="Drag to reorder">⠿</span>`
     : '';
 
   card.innerHTML = `
@@ -514,20 +514,11 @@ function buildCard(r, index) {
     ${menuBtn ? `<div class="card-footer">${menuBtn}</div>` : ''}
   `;
 
-  if (isEditor) {
-    const handle = card.querySelector('.drag-handle');
-    handle.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      startCardDrag(e, card, r.id);
-    });
-  }
-
   return card;
 }
 
 /* ==============================
    BUILD GROUP FOLDER-CARD
-   Same grid slot as a resource card — iOS folder style
    ============================== */
 function buildGroupCard(grp, grpResources, index) {
   const el = document.createElement('div');
@@ -536,76 +527,78 @@ function buildGroupCard(grp, grpResources, index) {
   el.dataset.sectionId = grp.sectionId;
   el.style.animationDelay = `${index * 30}ms`;
 
-  // Preview: up to 4 favicons arranged in a 2×2 grid (cleaner than 3×3)
+  // 2×2 favicon mosaic (up to 4 icons)
   const previewItems = grpResources.slice(0, 4);
-  const previewHtml = previewItems.map(r => {
-    const fav = getFavicon(r.url);
-    const letter = r.name.charAt(0).toUpperCase();
-    return `<div class="fp-cell">${
-      fav
-        ? `<img src="${fav}" alt="" onerror="this.style.display='none';this.nextSibling.style.display='flex'"  /><span class="fp-letter" style="display:none">${letter}</span>`
-        : `<span class="fp-letter">${letter}</span>`
-    }</div>`;
-  }).join('');
-
-  // Pad to always show 4 cells for visual consistency
-  const padded = previewHtml + '<div class="fp-cell fp-empty"></div>'.repeat(Math.max(0, 4 - previewItems.length));
-
-  const editorActions = isEditor ? `
-    <div class="folder-editor-actions">
-      <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename">✎</button>
-      <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete">✕</button>
-    </div>` : '';
-
-  const folderDragHandle = isEditor ? `<span class="drag-handle folder-drag-handle" title="Drag to reorder">⠿</span>` : '';
+  const cells = [];
+  for (let i = 0; i < 4; i++) {
+    const r = previewItems[i];
+    if (r) {
+      const fav = getFavicon(r.url);
+      const letter = r.name.charAt(0).toUpperCase();
+      cells.push(`<div class="fp-cell">${
+        fav
+          ? `<img src="${fav}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="fp-letter" style="display:none">${letter}</span>`
+          : `<span class="fp-letter">${letter}</span>`
+      }</div>`);
+    } else {
+      cells.push(`<div class="fp-cell fp-empty"></div>`);
+    }
+  }
 
   el.innerHTML = `
     <div class="folder-closed">
-      ${folderDragHandle}
-      <div class="folder-mosaic">${padded}</div>
+      <div class="folder-mosaic">${cells.join('')}</div>
       <div class="folder-label">
         <span class="folder-name">${esc(grp.name)}</span>
         <span class="folder-count">${grpResources.length}</span>
       </div>
-      ${editorActions}
+      ${isEditor ? `<div class="folder-actions">
+        <span class="drag-handle sortable-handle" title="Drag to reorder">⠿</span>
+        <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename">✎</button>
+        <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete">✕</button>
+      </div>` : ''}
     </div>
     <div class="folder-open" id="folderopen-${grp.id}">
       <div class="folder-open-header">
         <span class="folder-open-name">${esc(grp.name)}</span>
         <button class="folder-close-btn" title="Close">✕</button>
       </div>
-      <div class="folder-open-grid resource-grid" id="foldergrid-${grp.id}" data-group-id="${grp.id}" data-section-id="${grp.sectionId}"></div>
+      <div class="folder-open-grid" id="foldergrid-${grp.id}"></div>
     </div>
   `;
 
-  // Populate open grid with draggable cards
+  // Populate inner grid
   const openGrid = el.querySelector(`#foldergrid-${grp.id}`);
   if (grpResources.length === 0) {
     openGrid.innerHTML = `<p class="section-empty" style="padding:8px 0 4px;">No resources yet — assign some via ⋯</p>`;
   } else {
     grpResources.forEach((r, i) => openGrid.appendChild(buildCard(r, i)));
   }
-  if (isEditor) setupGridDrag(openGrid);
 
-  // Wire folder drag handle
+  // Init SortableJS on the inner grid
   if (isEditor) {
-    const fdh = el.querySelector('.folder-drag-handle');
-    fdh.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      startFolderDrag(e, el);
+    Sortable.create(openGrid, {
+      animation: 150,
+      handle: '.sortable-handle',
+      ghostClass: 'drag-placeholder',
+      dragClass: 'drag-ghost',
+      onEnd(evt) {
+        const cards = [...openGrid.querySelectorAll('.resource-card[data-resource-id]')];
+        const { doc, writeBatch: wb } = window._fs;
+        const batch = wb(db);
+        cards.forEach((c, idx) => batch.update(doc(db, COL_RESOURCES, c.dataset.resourceId), { order: idx }));
+        batch.commit();
+      }
     });
   }
 
-  // Instant open — no delay
+  // Open folder on click (not on action buttons)
   el.querySelector('.folder-closed').addEventListener('click', e => {
-    if (e.target.closest('.folder-editor-actions')) return;
-    if (e.target.closest('.folder-drag-handle')) return;
-    if (el.classList.contains('folder-is-open')) return;
-    // Close others
+    if (e.target.closest('.folder-actions')) return;
     document.querySelectorAll('.group-folder-card.folder-is-open').forEach(o => {
       if (o !== el) o.classList.remove('folder-is-open');
     });
-    el.classList.add('folder-is-open');
+    el.classList.toggle('folder-is-open');
   });
 
   el.querySelector('.folder-close-btn').addEventListener('click', e => {
@@ -616,152 +609,38 @@ function buildGroupCard(grp, grpResources, index) {
   return el;
 }
 
-function openFolderCard(el) {
-  document.querySelectorAll('.group-folder-card.folder-is-open').forEach(o => {
-    if (o !== el) o.classList.remove('folder-is-open');
-  });
-  el.classList.add('folder-is-open');
-}
-
-function closeFolderCard(el) {
-  el.classList.remove('folder-is-open');
-}
-
 /* ==============================
-   DRAG & DROP — pointer-based, works for resource cards + folder-cards
-   A "draggable item" is either .resource-card or .group-folder-card
+   SORTABLEJS DRAG & DROP
+   Called once per main section grid after render
    ============================== */
-let _dragGhost   = null;
-let _dragSrc     = null;   // the actual DOM element being dragged
-let _dragGrid    = null;   // .resource-grid it lives in
-let _dragOffX    = 0;
-let _dragOffY    = 0;
-let _lastTarget  = null;   // last element we inserted before/after (debounce)
-
-// Set up a grid so its items are draggable
 function setupGridDrag(grid) {
-  // Items are set up in buildCard / buildGroupCard via their drag-handle / folder-drag-handle
+  if (!isEditor) return;
+
+  Sortable.create(grid, {
+    animation: 150,
+    handle: '.sortable-handle',
+    ghostClass: 'drag-placeholder',
+    dragClass: 'drag-ghost',
+    // Prevent dragging inside open folder grids
+    filter: '.folder-open-grid',
+    onEnd(evt) {
+      const items = [...grid.querySelectorAll(':scope > .resource-card, :scope > .group-folder-card')];
+      const { doc, writeBatch: wb } = window._fs;
+      const batch = wb(db);
+      let resIdx = 0, grpIdx = 0;
+      items.forEach(item => {
+        if (item.classList.contains('resource-card')) {
+          batch.update(doc(db, COL_RESOURCES, item.dataset.resourceId), { order: resIdx++ });
+        } else if (item.classList.contains('group-folder-card')) {
+          batch.update(doc(db, COL_GROUPS, item.dataset.groupId), { order: grpIdx++ });
+        }
+      });
+      batch.commit();
+    }
+  });
 }
 
-// Called from drag handle pointerdown in buildCard
-function startCardDrag(e, card, resourceId) {
-  _startDrag(e, card);
-}
-
-// Called from drag handle pointerdown in buildGroupCard
-function startFolderDrag(e, folderEl) {
-  _startDrag(e, folderEl);
-}
-
-function _startDrag(e, el) {
-  e.preventDefault();
-  _dragSrc  = el;
-  _dragGrid = el.closest('.resource-grid');
-  if (!_dragGrid) return;
-
-  const rect = el.getBoundingClientRect();
-  _dragOffX = e.clientX - rect.left;
-  _dragOffY = e.clientY - rect.top;
-
-  // Build ghost
-  _dragGhost = el.cloneNode(true);
-  _dragGhost.classList.add('drag-ghost');
-  // For folder-card, only clone the closed face visually
-  if (el.classList.contains('group-folder-card')) {
-    const open = _dragGhost.querySelector('.folder-open');
-    if (open) open.style.display = 'none';
-    const closed = _dragGhost.querySelector('.folder-closed');
-    if (closed) closed.style.display = '';
-    _dragGhost.classList.remove('folder-is-open');
-  }
-  _dragGhost.style.width  = rect.width  + 'px';
-  _dragGhost.style.height = (el.classList.contains('group-folder-card')
-    ? el.querySelector('.folder-closed').getBoundingClientRect().height
-    : rect.height) + 'px';
-  _dragGhost.style.left   = rect.left   + 'px';
-  _dragGhost.style.top    = rect.top    + 'px';
-  document.body.appendChild(_dragGhost);
-
-  el.classList.add('drag-placeholder');
-
-  document.addEventListener('pointermove', _onMove);
-  document.addEventListener('pointerup',   _onUp, { once: true });
-}
-
-function _onMove(e) {
-  if (!_dragGhost) return;
-  _dragGhost.style.left = (e.clientX - _dragOffX) + 'px';
-  _dragGhost.style.top  = (e.clientY - _dragOffY) + 'px';
-
-  // Find element under cursor (hide ghost first)
-  _dragGhost.style.visibility = 'hidden';
-  const below = document.elementFromPoint(e.clientX, e.clientY);
-  _dragGhost.style.visibility = '';
-  if (!below) return;
-
-  // Find the closest draggable sibling in the same grid
-  const targetItem = below.closest('.resource-card, .group-folder-card');
-  if (!targetItem || targetItem === _dragSrc) return;
-  if (targetItem.closest('.resource-grid') !== _dragGrid) return;
-  if (targetItem === _lastTarget) return;
-  _lastTarget = targetItem;
-
-  const box = targetItem.getBoundingClientRect();
-  // Use horizontal midpoint for grid layouts (items are in rows)
-  const mid = box.left + box.width / 2;
-  if (e.clientX > mid) {
-    _dragGrid.insertBefore(_dragSrc, targetItem.nextSibling);
-  } else {
-    _dragGrid.insertBefore(_dragSrc, targetItem);
-  }
-}
-
-async function _onUp() {
-  document.removeEventListener('pointermove', _onMove);
-  _lastTarget = null;
-
-  if (_dragGhost) { _dragGhost.remove(); _dragGhost = null; }
-  if (_dragSrc)   { _dragSrc.classList.remove('drag-placeholder'); }
-
-  if (!_dragSrc || !_dragGrid) {
-    _dragSrc = _dragGrid = null;
-    return;
-  }
-
-  const isResourceCard = _dragSrc.classList.contains('resource-card');
-  const isFolderCard   = _dragSrc.classList.contains('group-folder-card');
-
-  // Collect all draggable items in the grid in their new DOM order
-  const items = [..._dragGrid.querySelectorAll(':scope > .resource-card, :scope > .group-folder-card')];
-
-  if (isResourceCard) {
-    // Save resource order — only resource cards get an order update
-    const { doc, writeBatch: wb } = window._fs;
-    const batch = wb(db);
-    let resIdx = 0;
-    items.forEach(item => {
-      if (item.classList.contains('resource-card')) {
-        batch.update(doc(db, COL_RESOURCES, item.dataset.resourceId), { order: resIdx++ });
-      }
-    });
-    await batch.commit();
-  } else if (isFolderCard) {
-    // Save group order
-    const { doc, writeBatch: wb } = window._fs;
-    const batch = wb(db);
-    let grpIdx = 0;
-    items.forEach(item => {
-      if (item.classList.contains('group-folder-card')) {
-        batch.update(doc(db, COL_GROUPS, item.dataset.groupId), { order: grpIdx++ });
-      }
-    });
-    await batch.commit();
-  }
-
-  _dragSrc = _dragGrid = null;
-}
-
-// Empty stub kept for call sites
+// Stub kept for any legacy call sites
 function setupGridDrop(grid) {}
 
 async function saveResourceOrder(updates) {

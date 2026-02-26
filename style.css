@@ -943,16 +943,24 @@ body {
   flex-shrink: 0;
 }
 
-.folder-editor-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+/* Folder action row — drag handle + rename + delete, inline at bottom of card */
+.folder-actions {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   opacity: 0;
   transition: opacity var(--transition);
+  margin-top: 2px;
 }
-.folder-closed:hover .folder-editor-actions { opacity: 1; }
+.folder-closed:hover .folder-actions { opacity: 1; }
+.folder-actions .drag-handle {
+  /* override the absolute positioning from resource-card drag handle */
+  position: static;
+  opacity: 1;
+  margin-right: auto;  /* push rename/delete to the right */
+  font-size: 15px;
+  padding: 4px 6px;
+}
 
 /* ---- Open face — spans full row ---- */
 .folder-open { display: none; }
@@ -996,51 +1004,53 @@ body {
 .folder-close-btn:hover { color: var(--text); background: var(--surface); }
 
 .folder-open-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
   padding: 18px;
 }
 
 /* ============================================================
-   DRAG & DROP — pointer-event based
+   DRAG & DROP — SortableJS
    ============================================================ */
+
+/* The ⠿ drag handle on resource cards (absolute, top-right) */
 .drag-handle {
   position: absolute;
   top: 10px;
-  right: 38px;
+  right: 10px;
   font-size: 15px;
   color: var(--text-dim);
   cursor: grab;
   opacity: 0;
   z-index: 3;
   line-height: 1;
-  padding: 3px 5px;
+  padding: 4px 6px;
   border-radius: 5px;
   transition: opacity var(--transition), color var(--transition);
   touch-action: none;
   user-select: none;
 }
-.resource-card:hover .drag-handle,
-.folder-closed:hover .drag-handle { opacity: 1; }
+.resource-card:hover .drag-handle { opacity: 1; }
 .drag-handle:hover { color: var(--text); }
+.drag-handle:active { cursor: grabbing; }
 
-/* Ghost card floating during drag */
-.drag-ghost {
-  position: fixed;
-  z-index: 9000;
-  pointer-events: none;
-  opacity: 0.88;
-  transform: scale(1.02) rotate(0.8deg);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  border-radius: var(--radius-lg);
-  background: var(--card-bg);
-  border: 1.5px solid var(--blue);
-  overflow: hidden;
-  transition: none;
+/* SortableJS ghost (the element left in place while dragging) */
+.drag-placeholder {
+  opacity: 0.25 !important;
+  border: 2px dashed var(--border2) !important;
+  background: var(--surface2) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Placeholder where the card came from */
-.drag-placeholder {
-  opacity: 0.2;
-  pointer-events: none;
+/* SortableJS drag element (the floating copy) */
+.drag-ghost {
+  opacity: 0.95 !important;
+  transform: rotate(1.5deg) scale(1.02) !important;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.45) !important;
+  border-color: var(--blue) !important;
+  cursor: grabbing !important;
 }
 
 
