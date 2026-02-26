@@ -53,6 +53,9 @@ let contextSectionId  = null;
 
 // Drag & drop handled by SortableJS (see setupGridDrag)
 
+// Track which group folders are open so render() can restore them
+const openFolderIds = new Set();
+
 /* ==============================
    FIREBASE INIT
    ============================== */
@@ -592,24 +595,32 @@ function buildGroupCard(grp, grpResources, index) {
     });
   }
 
-  // Open folder — rAF ensures the grid-column expansion and content reveal
-  // are batched into a single paint, eliminating the double-reflow stutter
+  // Restore open state if this folder was open before the render
+  if (openFolderIds.has(grp.id)) {
+    el.classList.add('folder-is-open');
+  }
+
+  // Open folder on click (not on action buttons or drag handle)
   el.querySelector('.folder-closed').addEventListener('click', e => {
     if (e.target.closest('.folder-actions')) return;
     if (e.target.closest('.drag-handle')) return;
-    const wasOpen = el.classList.contains('folder-is-open');
-    // Close all others immediately
+    // Close all others
     document.querySelectorAll('.group-folder-card.folder-is-open').forEach(o => {
-      if (o !== el) o.classList.remove('folder-is-open');
+      if (o !== el) {
+        o.classList.remove('folder-is-open');
+        openFolderIds.delete(o.dataset.groupId);
+      }
     });
-    requestAnimationFrame(() => {
-      el.classList.toggle('folder-is-open', !wasOpen);
-    });
+    const opening = !el.classList.contains('folder-is-open');
+    el.classList.toggle('folder-is-open', opening);
+    if (opening) openFolderIds.add(grp.id);
+    else openFolderIds.delete(grp.id);
   });
 
   el.querySelector('.folder-close-btn').addEventListener('click', e => {
     e.stopPropagation();
-    requestAnimationFrame(() => el.classList.remove('folder-is-open'));
+    el.classList.remove('folder-is-open');
+    openFolderIds.delete(grp.id);
   });
 
   return el;

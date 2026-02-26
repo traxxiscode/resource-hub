@@ -956,37 +956,18 @@ body {
 }
 .folder-closed:hover .folder-actions { opacity: 1; }
 
+
 /* ---- Open face — spans full row ---- */
-/*
-  The delay comes from toggling display:none which forces a full reflow
-  and grid recalculation. Instead we use a max-height + opacity transition
-  on .folder-open, and only change grid-column when actually open.
-  The closed face uses visibility so it doesn't reflow on hide.
-*/
-.folder-open {
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-height 0.22s ease, opacity 0.18s ease;
-  /* Don't display:none — keep it in flow so transition works */
-  pointer-events: none;
+.folder-open { display: none; }
+.group-folder-card.folder-is-open { grid-column: 1 / -1; }
+.group-folder-card.folder-is-open .folder-closed { display: none; }
+.group-folder-card.folder-is-open .folder-open {
+  display: block;
   background: var(--surface2);
   border: 1.5px solid var(--orange);
   border-radius: var(--radius-lg);
+  overflow: hidden;
   box-shadow: 0 0 0 3px rgba(255,112,34,0.08);
-}
-
-.group-folder-card.folder-is-open {
-  grid-column: 1 / -1;
-}
-.group-folder-card.folder-is-open .folder-closed {
-  display: none;
-}
-.group-folder-card.folder-is-open .folder-open {
-  max-height: 2000px;
-  opacity: 1;
-  pointer-events: auto;
-  transition: max-height 0.28s ease, opacity 0.18s ease;
 }
 
 .folder-open-header {
