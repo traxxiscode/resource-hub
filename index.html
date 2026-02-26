@@ -59,6 +59,7 @@
 
         <!-- Editor-only buttons (hidden for viewers) -->
         <button class="btn btn-outline" id="addSectionBtn" style="display:none;">+ Section</button>
+        <button class="btn btn-outline" id="addGroupBtn" style="display:none;">+ Group</button>
         <button class="btn btn-accent" id="addResourceBtn" style="display:none;">+ Resource</button>
 
         <!-- Edit Key toggle -->
@@ -182,7 +183,9 @@
         <button class="modal-close" data-close="groupModal">✕</button>
       </div>
       <div class="modal-body">
-        <p class="modal-subtext">Groups let you organise resources within a section into collapsible folders.</p>
+        <p class="modal-subtext">Groups organise resources within a section into collapsible folders.</p>
+        <label class="field-label" for="grpSection">Section</label>
+        <select id="grpSection" class="field-select"></select>
         <label class="field-label" for="grpName">Group Name</label>
         <input type="text" id="grpName" class="field-input" placeholder="e.g. Quick Links" />
       </div>
@@ -219,8 +222,28 @@
   <!-- ===== CONTEXT MENU ===== -->
   <div class="context-menu" id="contextMenu">
     <button class="ctx-item" id="ctxEdit">✎ Edit</button>
+    <button class="ctx-item" id="ctxAssignGroup">⊞ Assign Group</button>
     <button class="ctx-item" id="ctxMove">⇄ Move / Copy</button>
     <button class="ctx-item ctx-danger" id="ctxDelete">✕ Delete</button>
+  </div>
+
+  <!-- ===== MODAL: Assign Group ===== -->
+  <div class="modal-backdrop" id="assignGroupModal" role="dialog" aria-modal="true" aria-labelledby="assignGroupModalTitle">
+    <div class="modal modal--sm">
+      <div class="modal-header">
+        <h2 class="modal-title" id="assignGroupModalTitle">Assign to Group</h2>
+        <button class="modal-close" data-close="assignGroupModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-subtext" id="assignGroupResourceName"></p>
+        <label class="field-label" for="assignGroupSelect">Group</label>
+        <select id="assignGroupSelect" class="field-select"></select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="assignGroupModal">Cancel</button>
+        <button class="btn btn-accent" id="confirmAssignGroupBtn">Assign</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js" type="module"></script>

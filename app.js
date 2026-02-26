@@ -51,9 +51,7 @@ let editingGroupId    = null;
 let contextResourceId = null;
 let contextSectionId  = null;
 
-// Drag state
-let dragSrcId   = null;  // resource id being dragged
-let dragOverId  = null;  // resource id being hovered over
+// Drag state managed by pointer-event drag system (see startCardDrag)
 
 /* ==============================
    FIREBASE INIT
@@ -129,15 +127,21 @@ function lockOut() {
 async function loadData() {
   const { collection, getDocs, orderBy, query } = window._fs;
 
-  const [secSnap, resSnap, grpSnap] = await Promise.all([
-    getDocs(query(collection(db, COL_SECTIONS),  orderBy('order', 'asc'))),
-    getDocs(query(collection(db, COL_RESOURCES), orderBy('order', 'asc'))),
-    getDocs(query(collection(db, COL_GROUPS),    orderBy('order', 'asc')))
+  const [secSnap, resSnap] = await Promise.all([
+    getDocs(query(collection(db, COL_SECTIONS),  orderBy('order',     'asc'))),
+    getDocs(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')))
   ]);
 
   sections  = secSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   resources = resSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-  groups    = grpSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // Groups collection may not exist yet — don't let it block the rest
+  try {
+    const grpSnap = await getDocs(query(collection(db, COL_GROUPS), orderBy('createdAt', 'asc')));
+    groups = grpSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    groups = [];
+  }
 }
 
 /* ==============================
@@ -151,15 +155,15 @@ function subscribeRealtime() {
     render();
   });
 
-  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('order', 'asc')), snap => {
+  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')), snap => {
     resources = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   });
 
-  onSnapshot(query(collection(db, COL_GROUPS), orderBy('order', 'asc')), snap => {
+  onSnapshot(query(collection(db, COL_GROUPS), orderBy('createdAt', 'asc')), snap => {
     groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
-  });
+  }, () => { groups = []; });
 }
 
 /* ==============================
@@ -357,20 +361,18 @@ function render() {
 
   [...main.children].forEach(c => { if (c !== empty) c.remove(); });
 
-  // Update empty state text based on editor mode
   document.getElementById('emptyActionsEditor').style.display  = isEditor ? 'flex' : 'none';
   document.getElementById('emptyActionsViewer').style.display  = isEditor ? 'none' : 'flex';
 
-  // Show/hide editor-only header buttons
-  document.getElementById('addSectionBtn').style.display   = isEditor ? '' : 'none';
-  document.getElementById('addResourceBtn').style.display  = isEditor ? '' : 'none';
+  document.getElementById('addSectionBtn').style.display  = isEditor ? '' : 'none';
+  document.getElementById('addGroupBtn').style.display    = isEditor ? '' : 'none';
+  document.getElementById('addResourceBtn').style.display = isEditor ? '' : 'none';
 
   if (sections.length === 0 && !query) {
     empty.classList.remove('hidden');
     return;
   }
   empty.classList.add('hidden');
-
   if (sections.length === 0) return;
 
   let totalVisible = 0;
@@ -378,7 +380,7 @@ function render() {
   sections.forEach(sec => {
     const secResources = resources.filter(r => r.sectionId === sec.id);
     const secGroups    = groups.filter(g => g.sectionId === sec.id)
-                               .sort((a,b) => (a.order||0) - (b.order||0));
+                               .sort((a, b) => (a.order || 0) - (b.order || 0));
 
     const filtered = query
       ? secResources.filter(r =>
@@ -390,7 +392,6 @@ function render() {
       : secResources;
 
     if (query && filtered.length === 0) return;
-
     totalVisible += filtered.length;
 
     const block = document.createElement('div');
@@ -400,7 +401,6 @@ function render() {
     const sectionActions = isEditor ? `
       <div class="section-actions">
         <button class="btn btn-sm btn-outline add-res-to-sec" data-section-id="${sec.id}">+ Resource</button>
-        <button class="btn btn-sm btn-outline add-group-to-sec" data-section-id="${sec.id}">+ Group</button>
         <button class="btn-icon rename-sec" data-section-id="${sec.id}" title="Rename section">✎</button>
         <button class="btn-icon delete-sec" data-section-id="${sec.id}" title="Delete section">✕</button>
       </div>` : '';
@@ -416,34 +416,40 @@ function render() {
 
     const contentEl = block.querySelector(`#content-${sec.id}`);
 
+    const validGroupIds = new Set(secGroups.map(g => g.id));
+
+    // Ungrouped resources
+    const ungrouped = filtered
+      .filter(r => !r.groupId || !validGroupIds.has(r.groupId))
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
     if (filtered.length === 0 && secGroups.length === 0) {
       contentEl.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
     } else {
-      // Ungrouped resources (no groupId or groupId not in current groups list)
-      const validGroupIds = new Set(secGroups.map(g => g.id));
-      const ungrouped = filtered.filter(r => !r.groupId || !validGroupIds.has(r.groupId))
-                                .sort((a,b) => (a.order||0) - (b.order||0));
+      // Ungrouped grid
+      if (ungrouped.length > 0 || !query) {
+        const ungroupedGrid = document.createElement('div');
+        ungroupedGrid.className = 'resource-grid';
+        ungroupedGrid.dataset.sectionId = sec.id;
+        ungroupedGrid.dataset.groupId   = '';
+        ungroupedGrid.id = `grid-${sec.id}`;
 
-      // Build ungrouped grid (drop target for "no group")
-      const ungroupedGrid = document.createElement('div');
-      ungroupedGrid.className = 'resource-grid';
-      ungroupedGrid.dataset.sectionId = sec.id;
-      ungroupedGrid.dataset.groupId   = '';
-      ungroupedGrid.id = `grid-${sec.id}`;
-
-      if (ungrouped.length === 0 && !query) {
-        if (isEditor) {
-          ungroupedGrid.innerHTML = `<div class="drop-zone-hint">Drop resources here</div>`;
+        if (ungrouped.length === 0 && isEditor && !query) {
+          ungroupedGrid.innerHTML = `<p class="section-empty">No ungrouped resources.</p>`;
+        } else {
+          ungrouped.forEach((r, i) => ungroupedGrid.appendChild(buildCard(r, i)));
         }
-      } else {
-        ungrouped.forEach((r, i) => ungroupedGrid.appendChild(buildCard(r, i)));
+        contentEl.appendChild(ungroupedGrid);
       }
-      contentEl.appendChild(ungroupedGrid);
 
-      // Groups
+      // Groups — compact iOS-style
       secGroups.forEach(grp => {
-        const grpResources = filtered.filter(r => r.groupId === grp.id)
-                                     .sort((a,b) => (a.order||0) - (b.order||0));
+        const grpResources = filtered
+          .filter(r => r.groupId === grp.id)
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        // In search mode, skip groups with no matching resources
+        if (query && grpResources.length === 0) return;
 
         const grpEl = document.createElement('div');
         grpEl.className = 'resource-group';
@@ -458,26 +464,34 @@ function render() {
 
         grpEl.innerHTML = `
           <div class="group-header">
-            <span class="group-toggle" data-group-id="${grp.id}">▾</span>
-            <span class="group-name" data-group-id="${grp.id}">${esc(grp.name)}</span>
-            <span class="section-count">${grpResources.length}</span>
+            <button class="group-toggle-btn" data-group-id="${grp.id}" aria-label="Toggle group">
+              <svg class="group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <span class="group-name">${esc(grp.name)}</span>
+            <span class="group-count">${grpResources.length}</span>
             ${grpActions}
           </div>
-          <div class="resource-grid group-grid" id="grid-${grp.id}" data-section-id="${sec.id}" data-group-id="${grp.id}"></div>
+          <div class="group-body" id="grpbody-${grp.id}"></div>
         `;
 
-        const grpGrid = grpEl.querySelector(`#grid-${grp.id}`);
-        if (grpResources.length === 0) {
-          if (isEditor) grpGrid.innerHTML = `<div class="drop-zone-hint">Drop resources here</div>`;
+        const grpBody = grpEl.querySelector(`#grpbody-${grp.id}`);
+        const grpGrid = document.createElement('div');
+        grpGrid.className = 'resource-grid group-grid';
+        grpGrid.dataset.sectionId = sec.id;
+        grpGrid.dataset.groupId   = grp.id;
+        grpGrid.id = `grid-${grp.id}`;
+
+        if (grpResources.length === 0 && isEditor) {
+          grpGrid.innerHTML = `<p class="section-empty" style="padding:12px 0 4px;">No resources in this group yet.</p>`;
         } else {
           grpResources.forEach((r, i) => grpGrid.appendChild(buildCard(r, i)));
         }
-
+        grpBody.appendChild(grpGrid);
         contentEl.appendChild(grpEl);
       });
     }
 
-    // Wire up drag-and-drop on all grids in this section
+    // Wire up drag-and-drop on all grids (only within section, no cross-grid)
     if (isEditor && !query) {
       block.querySelectorAll('.resource-grid').forEach(grid => setupGridDrop(grid));
     }
@@ -501,10 +515,6 @@ function buildCard(r, index) {
   card.rel = 'noopener noreferrer';
   card.dataset.resourceId = r.id;
   card.style.animationDelay = `${index * 30}ms`;
-
-  if (isEditor) {
-    card.draggable = true;
-  }
 
   const faviconUrl = getFavicon(r.url);
   const domain     = getDomain(r.url);
@@ -545,18 +555,11 @@ function buildCard(r, index) {
     ${menuBtn ? `<div class="card-footer">${menuBtn}</div>` : ''}
   `;
 
-  // Drag events
   if (isEditor) {
-    card.addEventListener('dragstart', e => {
-      dragSrcId = r.id;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', r.id);
-    });
-    card.addEventListener('dragend', () => {
-      dragSrcId = null;
-      card.classList.remove('dragging');
-      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    const handle = card.querySelector('.drag-handle');
+    handle.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      startCardDrag(e, card, r.id);
     });
   }
 
@@ -564,83 +567,105 @@ function buildCard(r, index) {
 }
 
 /* ==============================
-   DRAG & DROP: GRID SETUP
+   POINTER-BASED DRAG & DROP
+   ============================== */
+let _dragCard      = null;   // the ghost element
+let _dragSrcCard   = null;   // the original card (kept as placeholder)
+let _dragResId     = null;   // resource id being dragged
+let _dragGrid      = null;   // grid the drag started in
+let _dragOffX      = 0;
+let _dragOffY      = 0;
+
+function startCardDrag(e, card, resourceId) {
+  _dragResId   = resourceId;
+  _dragGrid    = card.closest('.resource-grid');
+  _dragSrcCard = card;
+
+  const rect = card.getBoundingClientRect();
+  _dragOffX = e.clientX - rect.left;
+  _dragOffY = e.clientY - rect.top;
+
+  // Ghost
+  _dragCard = card.cloneNode(true);
+  _dragCard.classList.add('drag-ghost');
+  _dragCard.style.width  = rect.width  + 'px';
+  _dragCard.style.height = rect.height + 'px';
+  _dragCard.style.left   = rect.left   + 'px';
+  _dragCard.style.top    = rect.top    + 'px';
+  document.body.appendChild(_dragCard);
+
+  // Placeholder appearance
+  card.classList.add('drag-placeholder');
+
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup',   onPointerUp, { once: true });
+}
+
+function onPointerMove(e) {
+  if (!_dragCard) return;
+  _dragCard.style.left = (e.clientX - _dragOffX) + 'px';
+  _dragCard.style.top  = (e.clientY - _dragOffY) + 'px';
+
+  // Hide ghost temporarily to find element underneath
+  _dragCard.style.pointerEvents = 'none';
+  const below = document.elementFromPoint(e.clientX, e.clientY);
+  _dragCard.style.pointerEvents = '';
+
+  if (!below) return;
+
+  // Only allow reordering within the same grid
+  const targetCard = below.closest('.resource-card');
+  if (targetCard && targetCard !== _dragSrcCard && targetCard.closest('.resource-grid') === _dragGrid) {
+    const box = targetCard.getBoundingClientRect();
+    const isAfter = e.clientY > box.top + box.height / 2;
+    if (isAfter) {
+      _dragGrid.insertBefore(_dragSrcCard, targetCard.nextSibling);
+    } else {
+      _dragGrid.insertBefore(_dragSrcCard, targetCard);
+    }
+  }
+}
+
+async function onPointerUp() {
+  document.removeEventListener('pointermove', onPointerMove);
+
+  if (_dragCard) {
+    _dragCard.remove();
+    _dragCard = null;
+  }
+  if (_dragSrcCard) {
+    _dragSrcCard.classList.remove('drag-placeholder');
+  }
+
+  if (!_dragResId || !_dragGrid) {
+    _dragResId = _dragSrcCard = _dragGrid = null;
+    return;
+  }
+
+  // Collect new order from DOM
+  const cards   = [..._dragGrid.querySelectorAll('.resource-card[data-resource-id]')];
+  const updates = cards.map((c, idx) => ({ id: c.dataset.resourceId, order: idx }));
+
+  await saveResourceOrder(updates);
+
+  _dragResId = _dragSrcCard = _dragGrid = null;
+}
+
+/* ==============================
+   DRAG & DROP: GRID SETUP (just prevents default for pointer compat)
    ============================== */
 function setupGridDrop(grid) {
-  grid.addEventListener('dragover', e => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-
-    const afterEl = getDragAfterElement(grid, e.clientY, e.clientX);
-    const dragging = document.querySelector('.dragging');
-    if (!dragging) return;
-
-    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-
-    if (afterEl == null) {
-      grid.appendChild(dragging);
-    } else {
-      grid.insertBefore(dragging, afterEl);
-    }
-    grid.classList.add('drag-over');
-  });
-
-  grid.addEventListener('dragleave', e => {
-    if (!grid.contains(e.relatedTarget)) {
-      grid.classList.remove('drag-over');
-    }
-  });
-
-  grid.addEventListener('drop', async e => {
-    e.preventDefault();
-    grid.classList.remove('drag-over');
-    if (!dragSrcId) return;
-
-    const newGroupId   = grid.dataset.groupId   || null;
-    const newSectionId = grid.dataset.sectionId;
-
-    // Collect new order from DOM
-    const cards = [...grid.querySelectorAll('.resource-card[data-resource-id]')];
-    const updates = cards.map((card, idx) => ({
-      id:        card.dataset.resourceId,
-      order:     idx,
-      groupId:   newGroupId,
-      sectionId: newSectionId
-    }));
-
-    // Persist to Firestore
-    await saveResourceOrder(updates, dragSrcId, newGroupId, newSectionId);
-  });
+  // Nothing extra needed — pointer events handle everything above.
+  // Keeping this function in case future cross-grid drops are added.
 }
 
-function getDragAfterElement(container, y, x) {
-  const draggableElements = [...container.querySelectorAll('.resource-card:not(.dragging)')];
-  return draggableElements.reduce((closest, child) => {
-    const box = child.getBoundingClientRect();
-    const offsetY = y - box.top - box.height / 2;
-    if (offsetY < 0 && offsetY > closest.offset) {
-      return { offset: offsetY, element: child };
-    }
-    return closest;
-  }, { offset: Number.NEGATIVE_INFINITY }).element;
-}
-
-async function saveResourceOrder(updates, draggedId, newGroupId, newSectionId) {
+async function saveResourceOrder(updates) {
   if (!isEditor) return;
   const { doc, writeBatch: wb } = window._fs;
   const batch = wb(db);
-
   for (const u of updates) {
-    const ref = doc(db, COL_RESOURCES, u.id);
-    const data = { order: u.order };
-    // Only update groupId/sectionId for the dragged card
-    if (u.id === draggedId) {
-      data.groupId   = u.groupId   || '';
-      data.sectionId = u.sectionId;
-    }
-    batch.update(ref, data);
+    batch.update(doc(db, COL_RESOURCES, u.id), { order: u.order });
   }
-
   await batch.commit();
 }
 
@@ -849,23 +874,38 @@ function openSectionModal(sectionId = null) {
 /* ==============================
    OPEN GROUP MODAL
    ============================== */
-function openGroupModal(sectionId, groupId = null) {
+function openGroupModal(sectionId = null, groupId = null) {
   if (!isEditor) return;
-  const titleEl = document.getElementById('groupModalTitle');
-  const nameEl  = document.getElementById('grpName');
+  const titleEl  = document.getElementById('groupModalTitle');
+  const nameEl   = document.getElementById('grpName');
+  const secSel   = document.getElementById('grpSection');
+  const saveBtn  = document.getElementById('saveGroupBtn');
   editingGroupId = groupId;
 
-  // Store sectionId in a data attr on the save button
-  document.getElementById('saveGroupBtn').dataset.sectionId = sectionId || '';
+  // Populate section dropdown
+  secSel.innerHTML = '';
+  sections.forEach(sec => {
+    const opt = document.createElement('option');
+    opt.value = sec.id;
+    opt.textContent = sec.name;
+    secSel.appendChild(opt);
+  });
+  if (sectionId) secSel.value = sectionId;
 
+  // When renaming a group, lock the section selector and prefill name
   if (groupId) {
     const grp = groups.find(g => g.id === groupId);
     titleEl.textContent = 'Rename Group';
     nameEl.value = grp ? grp.name : '';
+    secSel.disabled = true;
+    secSel.value = grp ? grp.sectionId : (sectionId || '');
   } else {
     titleEl.textContent = 'Add Group';
     nameEl.value = '';
+    secSel.disabled = false;
   }
+
+  saveBtn.dataset.sectionId = '';  // read from select at save time
 
   openModal('groupModal');
   setTimeout(() => nameEl.focus(), 50);
@@ -888,6 +928,48 @@ function openMoveModal(resourceId) {
   document.querySelector('input[name="moveAction"][value="move"]').checked = true;
   openModal('moveModal');
 }
+
+/* ==============================
+   OPEN ASSIGN GROUP MODAL
+   ============================== */
+function openAssignGroupModal(resourceId) {
+  if (!isEditor) return;
+  const r = resources.find(r => r.id === resourceId);
+  if (!r) return;
+  contextResourceId = resourceId;
+
+  document.getElementById('assignGroupResourceName').textContent = `"${r.name}"`;
+
+  const sel = document.getElementById('assignGroupSelect');
+  sel.innerHTML = '';
+
+  // "No group" option
+  const noneOpt = document.createElement('option');
+  noneOpt.value = '';
+  noneOpt.textContent = '— No group (ungrouped) —';
+  sel.appendChild(noneOpt);
+
+  // Groups in the same section
+  const secGroups = groups.filter(g => g.sectionId === r.sectionId)
+                          .sort((a,b) => (a.order||0) - (b.order||0));
+  secGroups.forEach(grp => {
+    const opt = document.createElement('option');
+    opt.value = grp.id;
+    opt.textContent = grp.name;
+    sel.appendChild(opt);
+  });
+
+  sel.value = r.groupId || '';
+  openModal('assignGroupModal');
+}
+
+document.getElementById('confirmAssignGroupBtn').addEventListener('click', async () => {
+  if (!isEditor) return;
+  const newGroupId = document.getElementById('assignGroupSelect').value;
+  const { doc, updateDoc } = window._fs;
+  await updateDoc(doc(db, COL_RESOURCES, contextResourceId), { groupId: newGroupId });
+  closeModal('assignGroupModal');
+});
 
 /* ==============================
    CONTEXT MENU
@@ -966,6 +1048,12 @@ document.addEventListener('click', e => {
     openSectionModal(); return;
   }
 
+  if (e.target.id === 'addGroupBtn') {
+    if (!isEditor) return;
+    if (sections.length === 0) { alert('Please add a section first.'); return; }
+    openGroupModal(); return;
+  }
+
   if (e.target.id === 'addResourceBtn' || e.target.id === 'emptyAddResourceBtn') {
     if (!isEditor) return;
     if (sections.length === 0) { alert('Please add a section first.'); openSectionModal(); return; }
@@ -994,13 +1082,14 @@ document.addEventListener('click', e => {
   if (deleteGrp && isEditor) { deleteGroup(deleteGrp.dataset.groupId); return; }
 
   // Group toggle collapse/expand
-  const grpToggle = e.target.closest('.group-toggle');
+  const grpToggle = e.target.closest('.group-toggle-btn');
   if (grpToggle) {
     const grpEl   = grpToggle.closest('.resource-group');
-    const grpGrid = grpEl.querySelector('.group-grid');
+    const grpBody = grpEl.querySelector('.group-body');
+    const chevron = grpToggle.querySelector('.group-chevron');
     const collapsed = grpEl.classList.toggle('collapsed');
-    grpToggle.textContent = collapsed ? '▸' : '▾';
-    grpGrid.style.display = collapsed ? 'none' : '';
+    if (chevron) chevron.style.transform = collapsed ? 'rotate(0deg)' : 'rotate(90deg)';
+    grpBody.style.display = collapsed ? 'none' : '';
     return;
   }
 
@@ -1019,6 +1108,10 @@ document.addEventListener('click', e => {
   }
 
   if (e.target.id === 'ctxEdit'  && isEditor) { closeContextMenu(); openResourceModal(contextResourceId); return; }
+  if (e.target.id === 'ctxAssignGroup' && isEditor) {
+    closeContextMenu();
+    openAssignGroupModal(contextResourceId); return;
+  }
   if (e.target.id === 'ctxMove'  && isEditor) {
     closeContextMenu();
     if (sections.length < 2) { alert('You need at least 2 sections to move resources.'); return; }
@@ -1128,8 +1221,9 @@ document.getElementById('secName').addEventListener('keydown', e => {
 document.getElementById('saveGroupBtn').addEventListener('click', async () => {
   if (!isEditor) return;
   const name      = document.getElementById('grpName').value.trim();
-  const sectionId = document.getElementById('saveGroupBtn').dataset.sectionId;
+  const sectionId = document.getElementById('grpSection').value;
   if (!name) { document.getElementById('grpName').focus(); return; }
+  if (!sectionId && !editingGroupId) { alert('Please select a section.'); return; }
 
   const btn = document.getElementById('saveGroupBtn');
   btn.disabled = true; btn.textContent = 'Saving…';
@@ -1170,7 +1264,7 @@ document.getElementById('authKeyInput').addEventListener('keydown', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeContextMenu();
-    ['resourceModal', 'sectionModal', 'groupModal', 'moveModal', 'authModal'].forEach(id => {
+    ['resourceModal', 'sectionModal', 'groupModal', 'assignGroupModal', 'moveModal', 'authModal'].forEach(id => {
       if (document.getElementById(id).classList.contains('open')) closeModal(id);
     });
   }
