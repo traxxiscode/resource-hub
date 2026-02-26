@@ -415,7 +415,6 @@ function render() {
     `;
 
     const contentEl = block.querySelector(`#content-${sec.id}`);
-
     const validGroupIds = new Set(secGroups.map(g => g.id));
 
     // Ungrouped resources
@@ -423,77 +422,44 @@ function render() {
       .filter(r => !r.groupId || !validGroupIds.has(r.groupId))
       .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-    if (filtered.length === 0 && secGroups.length === 0) {
-      contentEl.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
+    // Filter groups: in search mode, only show groups that have matching resources
+    const visibleGroups = query
+      ? secGroups.filter(grp => filtered.some(r => r.groupId === grp.id))
+      : secGroups;
+
+    const hasContent = ungrouped.length > 0 || visibleGroups.length > 0;
+
+    if (!hasContent && !isEditor) {
+      contentEl.innerHTML = `<p class="section-empty">No resources yet.</p>`;
     } else {
-      // Ungrouped grid
-      if (ungrouped.length > 0 || !query) {
-        const ungroupedGrid = document.createElement('div');
-        ungroupedGrid.className = 'resource-grid';
-        ungroupedGrid.dataset.sectionId = sec.id;
-        ungroupedGrid.dataset.groupId   = '';
-        ungroupedGrid.id = `grid-${sec.id}`;
+      // Single unified grid containing both ungrouped cards and group folder-cards
+      const grid = document.createElement('div');
+      grid.className = 'resource-grid';
+      grid.dataset.sectionId = sec.id;
+      grid.dataset.groupId   = '';
+      grid.id = `grid-${sec.id}`;
 
-        if (ungrouped.length === 0 && isEditor && !query) {
-          ungroupedGrid.innerHTML = `<p class="section-empty">No ungrouped resources.</p>`;
-        } else {
-          ungrouped.forEach((r, i) => ungroupedGrid.appendChild(buildCard(r, i)));
-        }
-        contentEl.appendChild(ungroupedGrid);
-      }
+      // Render ungrouped cards
+      ungrouped.forEach((r, i) => grid.appendChild(buildCard(r, i)));
 
-      // Groups — compact iOS-style
-      secGroups.forEach(grp => {
+      // Render group folder-cards into the same grid
+      visibleGroups.forEach((grp, gi) => {
         const grpResources = filtered
           .filter(r => r.groupId === grp.id)
           .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-        // In search mode, skip groups with no matching resources
-        if (query && grpResources.length === 0) return;
-
-        const grpEl = document.createElement('div');
-        grpEl.className = 'resource-group';
-        grpEl.dataset.groupId   = grp.id;
-        grpEl.dataset.sectionId = sec.id;
-
-        const grpActions = isEditor ? `
-          <div class="group-actions">
-            <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename group">✎</button>
-            <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete group">✕</button>
-          </div>` : '';
-
-        grpEl.innerHTML = `
-          <div class="group-header">
-            <button class="group-toggle-btn" data-group-id="${grp.id}" aria-label="Toggle group">
-              <svg class="group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
-            </button>
-            <span class="group-name">${esc(grp.name)}</span>
-            <span class="group-count">${grpResources.length}</span>
-            ${grpActions}
-          </div>
-          <div class="group-body" id="grpbody-${grp.id}"></div>
-        `;
-
-        const grpBody = grpEl.querySelector(`#grpbody-${grp.id}`);
-        const grpGrid = document.createElement('div');
-        grpGrid.className = 'resource-grid group-grid';
-        grpGrid.dataset.sectionId = sec.id;
-        grpGrid.dataset.groupId   = grp.id;
-        grpGrid.id = `grid-${grp.id}`;
-
-        if (grpResources.length === 0 && isEditor) {
-          grpGrid.innerHTML = `<p class="section-empty" style="padding:12px 0 4px;">No resources in this group yet.</p>`;
-        } else {
-          grpResources.forEach((r, i) => grpGrid.appendChild(buildCard(r, i)));
-        }
-        grpBody.appendChild(grpGrid);
-        contentEl.appendChild(grpEl);
+        grid.appendChild(buildGroupCard(grp, grpResources, gi));
       });
+
+      if (!hasContent && isEditor) {
+        grid.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
+      }
+
+      contentEl.appendChild(grid);
     }
 
-    // Wire up drag-and-drop on all grids (only within section, no cross-grid)
     if (isEditor && !query) {
-      block.querySelectorAll('.resource-grid').forEach(grid => setupGridDrop(grid));
+      block.querySelectorAll('.resource-grid').forEach(g => setupGridDrop(g));
     }
 
     main.appendChild(block);
@@ -567,8 +533,94 @@ function buildCard(r, index) {
 }
 
 /* ==============================
-   POINTER-BASED DRAG & DROP
+   BUILD GROUP FOLDER-CARD
+   Same grid slot as a resource card — iOS folder style
    ============================== */
+function buildGroupCard(grp, grpResources, index) {
+  const el = document.createElement('div');
+  el.className = 'group-folder-card';
+  el.dataset.groupId   = grp.id;
+  el.dataset.sectionId = grp.sectionId;
+  el.style.animationDelay = `${index * 30}ms`;
+
+  // Build preview icons (up to 9, like iOS)
+  const previewItems = grpResources.slice(0, 9);
+  const previewHtml = previewItems.map(r => {
+    const fav = getFavicon(r.url);
+    const letter = r.name.charAt(0).toUpperCase();
+    return `<div class="folder-preview-icon">
+      ${fav
+        ? `<img src="${fav}" alt="" onerror="this.parentElement.innerHTML='<span class=folder-letter>${letter}</span>'" />`
+        : `<span class="folder-letter">${letter}</span>`
+      }
+    </div>`;
+  }).join('');
+
+  const editorActions = isEditor ? `
+    <div class="folder-editor-actions">
+      <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename group">✎</button>
+      <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete group">✕</button>
+    </div>` : '';
+
+  el.innerHTML = `
+    <div class="folder-closed">
+      <div class="folder-icon-grid">${previewHtml || '<span class="folder-empty-icon">⊞</span>'}</div>
+      <div class="folder-label">
+        <span class="folder-name">${esc(grp.name)}</span>
+        <span class="folder-count">${grpResources.length}</span>
+      </div>
+      ${editorActions}
+    </div>
+    <div class="folder-open" id="folderopen-${grp.id}" style="display:none;">
+      <div class="folder-open-header">
+        <span class="folder-open-name">${esc(grp.name)}</span>
+        <button class="folder-close-btn" data-group-id="${grp.id}" title="Close folder">✕</button>
+      </div>
+      <div class="folder-open-grid" id="foldergrid-${grp.id}"></div>
+    </div>
+  `;
+
+  // Populate open grid
+  const openGrid = el.querySelector(`#foldergrid-${grp.id}`);
+  if (grpResources.length === 0) {
+    openGrid.innerHTML = `<p class="section-empty" style="padding:8px 0;">No resources yet — assign some via the ⋯ menu.</p>`;
+  } else {
+    grpResources.forEach((r, i) => openGrid.appendChild(buildCard(r, i)));
+  }
+
+  // Click the closed face to open
+  el.querySelector('.folder-closed').addEventListener('click', e => {
+    // Don't open if clicking editor action buttons
+    if (e.target.closest('.folder-editor-actions')) return;
+    openFolderCard(el, grp.id);
+  });
+
+  // Close button
+  el.querySelector('.folder-close-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    closeFolderCard(el);
+  });
+
+  return el;
+}
+
+function openFolderCard(el, groupId) {
+  // Close any other open folders first
+  document.querySelectorAll('.group-folder-card.folder-is-open').forEach(other => {
+    if (other !== el) closeFolderCard(other);
+  });
+
+  el.classList.add('folder-is-open');
+  el.querySelector('.folder-closed').style.display = 'none';
+  el.querySelector(`#folderopen-${groupId}`).style.display = '';
+}
+
+function closeFolderCard(el) {
+  el.classList.remove('folder-is-open');
+  const groupId = el.dataset.groupId;
+  el.querySelector('.folder-closed').style.display = '';
+  el.querySelector(`#folderopen-${groupId}`).style.display = 'none';
+}
 let _dragCard      = null;   // the ghost element
 let _dragSrcCard   = null;   // the original card (kept as placeholder)
 let _dragResId     = null;   // resource id being dragged
@@ -1080,18 +1132,6 @@ document.addEventListener('click', e => {
 
   const deleteGrp = e.target.closest('.delete-group');
   if (deleteGrp && isEditor) { deleteGroup(deleteGrp.dataset.groupId); return; }
-
-  // Group toggle collapse/expand
-  const grpToggle = e.target.closest('.group-toggle-btn');
-  if (grpToggle) {
-    const grpEl   = grpToggle.closest('.resource-group');
-    const grpBody = grpEl.querySelector('.group-body');
-    const chevron = grpToggle.querySelector('.group-chevron');
-    const collapsed = grpEl.classList.toggle('collapsed');
-    if (chevron) chevron.style.transform = collapsed ? 'rotate(0deg)' : 'rotate(90deg)';
-    grpBody.style.display = collapsed ? 'none' : '';
-    return;
-  }
 
   const secName = e.target.closest('.section-name');
   if (secName && isEditor && !e.target.closest('.section-actions')) {
