@@ -417,50 +417,43 @@ function render() {
     const contentEl = block.querySelector(`#content-${sec.id}`);
     const validGroupIds = new Set(secGroups.map(g => g.id));
 
-    // Ungrouped resources
-    const ungrouped = filtered
+    // --- SEARCH MODE: flat list of all matched resources, no groups ---
+    if (query) {
+      const grid = document.createElement('div');
+      grid.className = 'resource-grid';
+      filtered.sort((a, b) => (a.order || 0) - (b.order || 0))
+              .forEach((r, i) => grid.appendChild(buildCard(r, i)));
+      contentEl.appendChild(grid);
+      main.appendChild(block);
+      return;
+    }
+
+    // --- NORMAL MODE: ungrouped cards + group folder-cards in one grid ---
+    const ungrouped = secResources
       .filter(r => !r.groupId || !validGroupIds.has(r.groupId))
       .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-    // Filter groups: in search mode, only show groups that have matching resources
-    const visibleGroups = query
-      ? secGroups.filter(grp => filtered.some(r => r.groupId === grp.id))
-      : secGroups;
+    const grid = document.createElement('div');
+    grid.className = 'resource-grid';
+    grid.dataset.sectionId = sec.id;
+    grid.id = `grid-${sec.id}`;
 
-    const hasContent = ungrouped.length > 0 || visibleGroups.length > 0;
+    ungrouped.forEach((r, i) => grid.appendChild(buildCard(r, i)));
 
-    if (!hasContent && !isEditor) {
-      contentEl.innerHTML = `<p class="section-empty">No resources yet.</p>`;
-    } else {
-      // Single unified grid containing both ungrouped cards and group folder-cards
-      const grid = document.createElement('div');
-      grid.className = 'resource-grid';
-      grid.dataset.sectionId = sec.id;
-      grid.dataset.groupId   = '';
-      grid.id = `grid-${sec.id}`;
+    secGroups.forEach((grp, gi) => {
+      const grpResources = secResources
+        .filter(r => r.groupId === grp.id)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+      grid.appendChild(buildGroupCard(grp, grpResources, gi));
+    });
 
-      // Render ungrouped cards
-      ungrouped.forEach((r, i) => grid.appendChild(buildCard(r, i)));
-
-      // Render group folder-cards into the same grid
-      visibleGroups.forEach((grp, gi) => {
-        const grpResources = filtered
-          .filter(r => r.groupId === grp.id)
-          .sort((a, b) => (a.order || 0) - (b.order || 0));
-
-        grid.appendChild(buildGroupCard(grp, grpResources, gi));
-      });
-
-      if (!hasContent && isEditor) {
-        grid.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
-      }
-
-      contentEl.appendChild(grid);
+    if (secResources.length === 0 && secGroups.length === 0 && isEditor) {
+      grid.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
     }
 
-    if (isEditor && !query) {
-      block.querySelectorAll('.resource-grid').forEach(g => setupGridDrop(g));
-    }
+    contentEl.appendChild(grid);
+
+    if (isEditor) setupGridDrag(grid);
 
     main.appendChild(block);
   });
@@ -543,173 +536,233 @@ function buildGroupCard(grp, grpResources, index) {
   el.dataset.sectionId = grp.sectionId;
   el.style.animationDelay = `${index * 30}ms`;
 
-  // Build preview icons (up to 9, like iOS)
-  const previewItems = grpResources.slice(0, 9);
+  // Preview: up to 4 favicons arranged in a 2×2 grid (cleaner than 3×3)
+  const previewItems = grpResources.slice(0, 4);
   const previewHtml = previewItems.map(r => {
     const fav = getFavicon(r.url);
     const letter = r.name.charAt(0).toUpperCase();
-    return `<div class="folder-preview-icon">
-      ${fav
-        ? `<img src="${fav}" alt="" onerror="this.parentElement.innerHTML='<span class=folder-letter>${letter}</span>'" />`
-        : `<span class="folder-letter">${letter}</span>`
-      }
-    </div>`;
+    return `<div class="fp-cell">${
+      fav
+        ? `<img src="${fav}" alt="" onerror="this.style.display='none';this.nextSibling.style.display='flex'"  /><span class="fp-letter" style="display:none">${letter}</span>`
+        : `<span class="fp-letter">${letter}</span>`
+    }</div>`;
   }).join('');
+
+  // Pad to always show 4 cells for visual consistency
+  const padded = previewHtml + '<div class="fp-cell fp-empty"></div>'.repeat(Math.max(0, 4 - previewItems.length));
 
   const editorActions = isEditor ? `
     <div class="folder-editor-actions">
-      <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename group">✎</button>
-      <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete group">✕</button>
+      <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename">✎</button>
+      <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete">✕</button>
     </div>` : '';
+
+  const folderDragHandle = isEditor ? `<span class="drag-handle folder-drag-handle" title="Drag to reorder">⠿</span>` : '';
 
   el.innerHTML = `
     <div class="folder-closed">
-      <div class="folder-icon-grid">${previewHtml || '<span class="folder-empty-icon">⊞</span>'}</div>
+      ${folderDragHandle}
+      <div class="folder-mosaic">${padded}</div>
       <div class="folder-label">
         <span class="folder-name">${esc(grp.name)}</span>
         <span class="folder-count">${grpResources.length}</span>
       </div>
       ${editorActions}
     </div>
-    <div class="folder-open" id="folderopen-${grp.id}" style="display:none;">
+    <div class="folder-open" id="folderopen-${grp.id}">
       <div class="folder-open-header">
         <span class="folder-open-name">${esc(grp.name)}</span>
-        <button class="folder-close-btn" data-group-id="${grp.id}" title="Close folder">✕</button>
+        <button class="folder-close-btn" title="Close">✕</button>
       </div>
-      <div class="folder-open-grid" id="foldergrid-${grp.id}"></div>
+      <div class="folder-open-grid resource-grid" id="foldergrid-${grp.id}" data-group-id="${grp.id}" data-section-id="${grp.sectionId}"></div>
     </div>
   `;
 
-  // Populate open grid
+  // Populate open grid with draggable cards
   const openGrid = el.querySelector(`#foldergrid-${grp.id}`);
   if (grpResources.length === 0) {
-    openGrid.innerHTML = `<p class="section-empty" style="padding:8px 0;">No resources yet — assign some via the ⋯ menu.</p>`;
+    openGrid.innerHTML = `<p class="section-empty" style="padding:8px 0 4px;">No resources yet — assign some via ⋯</p>`;
   } else {
     grpResources.forEach((r, i) => openGrid.appendChild(buildCard(r, i)));
   }
+  if (isEditor) setupGridDrag(openGrid);
 
-  // Click the closed face to open
+  // Wire folder drag handle
+  if (isEditor) {
+    const fdh = el.querySelector('.folder-drag-handle');
+    fdh.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      startFolderDrag(e, el);
+    });
+  }
+
+  // Instant open — no delay
   el.querySelector('.folder-closed').addEventListener('click', e => {
-    // Don't open if clicking editor action buttons
     if (e.target.closest('.folder-editor-actions')) return;
-    openFolderCard(el, grp.id);
+    if (e.target.closest('.folder-drag-handle')) return;
+    if (el.classList.contains('folder-is-open')) return;
+    // Close others
+    document.querySelectorAll('.group-folder-card.folder-is-open').forEach(o => {
+      if (o !== el) o.classList.remove('folder-is-open');
+    });
+    el.classList.add('folder-is-open');
   });
 
-  // Close button
   el.querySelector('.folder-close-btn').addEventListener('click', e => {
     e.stopPropagation();
-    closeFolderCard(el);
+    el.classList.remove('folder-is-open');
   });
 
   return el;
 }
 
-function openFolderCard(el, groupId) {
-  // Close any other open folders first
-  document.querySelectorAll('.group-folder-card.folder-is-open').forEach(other => {
-    if (other !== el) closeFolderCard(other);
+function openFolderCard(el) {
+  document.querySelectorAll('.group-folder-card.folder-is-open').forEach(o => {
+    if (o !== el) o.classList.remove('folder-is-open');
   });
-
   el.classList.add('folder-is-open');
-  el.querySelector('.folder-closed').style.display = 'none';
-  el.querySelector(`#folderopen-${groupId}`).style.display = '';
 }
 
 function closeFolderCard(el) {
   el.classList.remove('folder-is-open');
-  const groupId = el.dataset.groupId;
-  el.querySelector('.folder-closed').style.display = '';
-  el.querySelector(`#folderopen-${groupId}`).style.display = 'none';
-}
-let _dragCard      = null;   // the ghost element
-let _dragSrcCard   = null;   // the original card (kept as placeholder)
-let _dragResId     = null;   // resource id being dragged
-let _dragGrid      = null;   // grid the drag started in
-let _dragOffX      = 0;
-let _dragOffY      = 0;
-
-function startCardDrag(e, card, resourceId) {
-  _dragResId   = resourceId;
-  _dragGrid    = card.closest('.resource-grid');
-  _dragSrcCard = card;
-
-  const rect = card.getBoundingClientRect();
-  _dragOffX = e.clientX - rect.left;
-  _dragOffY = e.clientY - rect.top;
-
-  // Ghost
-  _dragCard = card.cloneNode(true);
-  _dragCard.classList.add('drag-ghost');
-  _dragCard.style.width  = rect.width  + 'px';
-  _dragCard.style.height = rect.height + 'px';
-  _dragCard.style.left   = rect.left   + 'px';
-  _dragCard.style.top    = rect.top    + 'px';
-  document.body.appendChild(_dragCard);
-
-  // Placeholder appearance
-  card.classList.add('drag-placeholder');
-
-  document.addEventListener('pointermove', onPointerMove);
-  document.addEventListener('pointerup',   onPointerUp, { once: true });
-}
-
-function onPointerMove(e) {
-  if (!_dragCard) return;
-  _dragCard.style.left = (e.clientX - _dragOffX) + 'px';
-  _dragCard.style.top  = (e.clientY - _dragOffY) + 'px';
-
-  // Hide ghost temporarily to find element underneath
-  _dragCard.style.pointerEvents = 'none';
-  const below = document.elementFromPoint(e.clientX, e.clientY);
-  _dragCard.style.pointerEvents = '';
-
-  if (!below) return;
-
-  // Only allow reordering within the same grid
-  const targetCard = below.closest('.resource-card');
-  if (targetCard && targetCard !== _dragSrcCard && targetCard.closest('.resource-grid') === _dragGrid) {
-    const box = targetCard.getBoundingClientRect();
-    const isAfter = e.clientY > box.top + box.height / 2;
-    if (isAfter) {
-      _dragGrid.insertBefore(_dragSrcCard, targetCard.nextSibling);
-    } else {
-      _dragGrid.insertBefore(_dragSrcCard, targetCard);
-    }
-  }
-}
-
-async function onPointerUp() {
-  document.removeEventListener('pointermove', onPointerMove);
-
-  if (_dragCard) {
-    _dragCard.remove();
-    _dragCard = null;
-  }
-  if (_dragSrcCard) {
-    _dragSrcCard.classList.remove('drag-placeholder');
-  }
-
-  if (!_dragResId || !_dragGrid) {
-    _dragResId = _dragSrcCard = _dragGrid = null;
-    return;
-  }
-
-  // Collect new order from DOM
-  const cards   = [..._dragGrid.querySelectorAll('.resource-card[data-resource-id]')];
-  const updates = cards.map((c, idx) => ({ id: c.dataset.resourceId, order: idx }));
-
-  await saveResourceOrder(updates);
-
-  _dragResId = _dragSrcCard = _dragGrid = null;
 }
 
 /* ==============================
-   DRAG & DROP: GRID SETUP (just prevents default for pointer compat)
+   DRAG & DROP — pointer-based, works for resource cards + folder-cards
+   A "draggable item" is either .resource-card or .group-folder-card
    ============================== */
-function setupGridDrop(grid) {
-  // Nothing extra needed — pointer events handle everything above.
-  // Keeping this function in case future cross-grid drops are added.
+let _dragGhost   = null;
+let _dragSrc     = null;   // the actual DOM element being dragged
+let _dragGrid    = null;   // .resource-grid it lives in
+let _dragOffX    = 0;
+let _dragOffY    = 0;
+let _lastTarget  = null;   // last element we inserted before/after (debounce)
+
+// Set up a grid so its items are draggable
+function setupGridDrag(grid) {
+  // Items are set up in buildCard / buildGroupCard via their drag-handle / folder-drag-handle
 }
+
+// Called from drag handle pointerdown in buildCard
+function startCardDrag(e, card, resourceId) {
+  _startDrag(e, card);
+}
+
+// Called from drag handle pointerdown in buildGroupCard
+function startFolderDrag(e, folderEl) {
+  _startDrag(e, folderEl);
+}
+
+function _startDrag(e, el) {
+  e.preventDefault();
+  _dragSrc  = el;
+  _dragGrid = el.closest('.resource-grid');
+  if (!_dragGrid) return;
+
+  const rect = el.getBoundingClientRect();
+  _dragOffX = e.clientX - rect.left;
+  _dragOffY = e.clientY - rect.top;
+
+  // Build ghost
+  _dragGhost = el.cloneNode(true);
+  _dragGhost.classList.add('drag-ghost');
+  // For folder-card, only clone the closed face visually
+  if (el.classList.contains('group-folder-card')) {
+    const open = _dragGhost.querySelector('.folder-open');
+    if (open) open.style.display = 'none';
+    const closed = _dragGhost.querySelector('.folder-closed');
+    if (closed) closed.style.display = '';
+    _dragGhost.classList.remove('folder-is-open');
+  }
+  _dragGhost.style.width  = rect.width  + 'px';
+  _dragGhost.style.height = (el.classList.contains('group-folder-card')
+    ? el.querySelector('.folder-closed').getBoundingClientRect().height
+    : rect.height) + 'px';
+  _dragGhost.style.left   = rect.left   + 'px';
+  _dragGhost.style.top    = rect.top    + 'px';
+  document.body.appendChild(_dragGhost);
+
+  el.classList.add('drag-placeholder');
+
+  document.addEventListener('pointermove', _onMove);
+  document.addEventListener('pointerup',   _onUp, { once: true });
+}
+
+function _onMove(e) {
+  if (!_dragGhost) return;
+  _dragGhost.style.left = (e.clientX - _dragOffX) + 'px';
+  _dragGhost.style.top  = (e.clientY - _dragOffY) + 'px';
+
+  // Find element under cursor (hide ghost first)
+  _dragGhost.style.visibility = 'hidden';
+  const below = document.elementFromPoint(e.clientX, e.clientY);
+  _dragGhost.style.visibility = '';
+  if (!below) return;
+
+  // Find the closest draggable sibling in the same grid
+  const targetItem = below.closest('.resource-card, .group-folder-card');
+  if (!targetItem || targetItem === _dragSrc) return;
+  if (targetItem.closest('.resource-grid') !== _dragGrid) return;
+  if (targetItem === _lastTarget) return;
+  _lastTarget = targetItem;
+
+  const box = targetItem.getBoundingClientRect();
+  // Use horizontal midpoint for grid layouts (items are in rows)
+  const mid = box.left + box.width / 2;
+  if (e.clientX > mid) {
+    _dragGrid.insertBefore(_dragSrc, targetItem.nextSibling);
+  } else {
+    _dragGrid.insertBefore(_dragSrc, targetItem);
+  }
+}
+
+async function _onUp() {
+  document.removeEventListener('pointermove', _onMove);
+  _lastTarget = null;
+
+  if (_dragGhost) { _dragGhost.remove(); _dragGhost = null; }
+  if (_dragSrc)   { _dragSrc.classList.remove('drag-placeholder'); }
+
+  if (!_dragSrc || !_dragGrid) {
+    _dragSrc = _dragGrid = null;
+    return;
+  }
+
+  const isResourceCard = _dragSrc.classList.contains('resource-card');
+  const isFolderCard   = _dragSrc.classList.contains('group-folder-card');
+
+  // Collect all draggable items in the grid in their new DOM order
+  const items = [..._dragGrid.querySelectorAll(':scope > .resource-card, :scope > .group-folder-card')];
+
+  if (isResourceCard) {
+    // Save resource order — only resource cards get an order update
+    const { doc, writeBatch: wb } = window._fs;
+    const batch = wb(db);
+    let resIdx = 0;
+    items.forEach(item => {
+      if (item.classList.contains('resource-card')) {
+        batch.update(doc(db, COL_RESOURCES, item.dataset.resourceId), { order: resIdx++ });
+      }
+    });
+    await batch.commit();
+  } else if (isFolderCard) {
+    // Save group order
+    const { doc, writeBatch: wb } = window._fs;
+    const batch = wb(db);
+    let grpIdx = 0;
+    items.forEach(item => {
+      if (item.classList.contains('group-folder-card')) {
+        batch.update(doc(db, COL_GROUPS, item.dataset.groupId), { order: grpIdx++ });
+      }
+    });
+    await batch.commit();
+  }
+
+  _dragSrc = _dragGrid = null;
+}
+
+// Empty stub kept for call sites
+function setupGridDrop(grid) {}
 
 async function saveResourceOrder(updates) {
   if (!isEditor) return;

@@ -842,9 +842,6 @@ body {
   position: relative;
   border-radius: var(--radius-lg);
   animation: fadeUp 0.3s ease both;
-  cursor: pointer;
-  /* When open, span all columns */
-  transition: all 0.22s ease;
 }
 
 /* ---- Closed face ---- */
@@ -852,14 +849,16 @@ body {
   background: var(--surface2);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px 16px 14px;
+  padding: 18px 18px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  cursor: pointer;
   transition: border-color var(--transition), background var(--transition),
               transform var(--transition), box-shadow var(--transition);
   position: relative;
   overflow: hidden;
+  user-select: none;
 }
 .folder-closed::before {
   content: '';
@@ -874,24 +873,24 @@ body {
   border-color: var(--orange);
   background: var(--card-hover);
   transform: translateY(-3px);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(255,112,34,0.25);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(255,112,34,0.2);
 }
 .group-folder-card:not(.folder-is-open) .folder-closed:hover::before { opacity: 1; }
 
-/* 3×3 preview icon grid */
-.folder-icon-grid {
+/* 2x2 favicon mosaic */
+.folder-mosaic {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
   gap: 5px;
+  width: 54px;
+  height: 54px;
   background: var(--surface3);
-  border-radius: 10px;
-  padding: 8px;
-  aspect-ratio: 1;
-  max-width: 80px;
+  border-radius: 12px;
+  padding: 7px;
+  flex-shrink: 0;
 }
-.folder-preview-icon {
-  width: 100%;
-  aspect-ratio: 1;
+.fp-cell {
   border-radius: 5px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -900,27 +899,23 @@ body {
   justify-content: center;
   overflow: hidden;
 }
-.folder-preview-icon img {
-  width: 70%;
-  height: 70%;
+.fp-cell img {
+  width: 80%;
+  height: 80%;
   object-fit: contain;
+  display: block;
 }
-.folder-letter {
+.fp-letter {
   font-family: var(--font-head);
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 8px;
+  font-weight: 800;
   background: linear-gradient(135deg, var(--orange), var(--blue));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-}
-.folder-empty-icon {
-  font-size: 28px;
-  color: var(--text-dim);
-  grid-column: 1 / -1;
-  text-align: center;
   line-height: 1;
 }
+.fp-empty { opacity: 0.3; }
 
 .folder-label {
   display: flex;
@@ -942,7 +937,7 @@ body {
   font-weight: 600;
   color: var(--orange);
   background: rgba(255,112,34,0.1);
-  border: 1px solid rgba(255,112,34,0.2);
+  border: 1px solid rgba(255,112,34,0.18);
   border-radius: 20px;
   padding: 1px 7px;
   flex-shrink: 0;
@@ -959,30 +954,30 @@ body {
 }
 .folder-closed:hover .folder-editor-actions { opacity: 1; }
 
-/* ---- Open (expanded) face — spans full width ---- */
-.group-folder-card.folder-is-open {
-  grid-column: 1 / -1;   /* span all grid columns */
-}
-
-.folder-open {
+/* ---- Open face — spans full row ---- */
+.folder-open { display: none; }
+.group-folder-card.folder-is-open { grid-column: 1 / -1; }
+.group-folder-card.folder-is-open .folder-closed { display: none; }
+.group-folder-card.folder-is-open .folder-open {
+  display: block;
   background: var(--surface2);
   border: 1.5px solid var(--orange);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 0 0 3px rgba(255,112,34,0.1);
+  box-shadow: 0 0 0 3px rgba(255,112,34,0.08);
 }
 
 .folder-open-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
+  padding: 11px 18px;
   border-bottom: 1px solid var(--border);
   background: var(--surface3);
 }
 .folder-open-name {
   font-family: var(--font-head);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -993,7 +988,7 @@ body {
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 15px;
+  font-size: 14px;
   padding: 4px 8px;
   border-radius: 6px;
   transition: color var(--transition), background var(--transition);
@@ -1001,9 +996,6 @@ body {
 .folder-close-btn:hover { color: var(--text); background: var(--surface); }
 
 .folder-open-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 18px;
   padding: 18px;
 }
 
@@ -1024,8 +1016,10 @@ body {
   border-radius: 5px;
   transition: opacity var(--transition), color var(--transition);
   touch-action: none;
+  user-select: none;
 }
-.resource-card:hover .drag-handle { opacity: 1; }
+.resource-card:hover .drag-handle,
+.folder-closed:hover .drag-handle { opacity: 1; }
 .drag-handle:hover { color: var(--text); }
 
 /* Ghost card floating during drag */
@@ -1033,32 +1027,22 @@ body {
   position: fixed;
   z-index: 9000;
   pointer-events: none;
-  opacity: 0.85;
-  transform: scale(1.03) rotate(1deg);
-  box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+  opacity: 0.88;
+  transform: scale(1.02) rotate(0.8deg);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   border-radius: var(--radius-lg);
   background: var(--card-bg);
   border: 1.5px solid var(--blue);
+  overflow: hidden;
   transition: none;
 }
 
 /* Placeholder where the card came from */
 .drag-placeholder {
-  opacity: 0.25;
+  opacity: 0.2;
   pointer-events: none;
 }
 
-/* Drop-zone hint (no longer used for cross-grid, but kept for empty groups) */
-.drop-zone-hint {
-  border: 2px dashed var(--border2);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  font-size: 13px;
-  text-align: center;
-  padding: 18px;
-  grid-column: 1 / -1;
-  pointer-events: none;
-}
 
 /* ============================================================
    SCROLLBAR
