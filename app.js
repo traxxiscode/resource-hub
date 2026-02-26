@@ -547,13 +547,13 @@ function buildGroupCard(grp, grpResources, index) {
 
   el.innerHTML = `
     <div class="folder-closed">
+      ${isEditor ? `<span class="drag-handle sortable-handle" title="Drag to reorder">⠿</span>` : ''}
       <div class="folder-mosaic">${cells.join('')}</div>
       <div class="folder-label">
         <span class="folder-name">${esc(grp.name)}</span>
         <span class="folder-count">${grpResources.length}</span>
       </div>
       ${isEditor ? `<div class="folder-actions">
-        <span class="drag-handle sortable-handle" title="Drag to reorder">⠿</span>
         <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename">✎</button>
         <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete">✕</button>
       </div>` : ''}
@@ -592,18 +592,24 @@ function buildGroupCard(grp, grpResources, index) {
     });
   }
 
-  // Open folder on click (not on action buttons)
+  // Open folder — rAF ensures the grid-column expansion and content reveal
+  // are batched into a single paint, eliminating the double-reflow stutter
   el.querySelector('.folder-closed').addEventListener('click', e => {
     if (e.target.closest('.folder-actions')) return;
+    if (e.target.closest('.drag-handle')) return;
+    const wasOpen = el.classList.contains('folder-is-open');
+    // Close all others immediately
     document.querySelectorAll('.group-folder-card.folder-is-open').forEach(o => {
       if (o !== el) o.classList.remove('folder-is-open');
     });
-    el.classList.toggle('folder-is-open');
+    requestAnimationFrame(() => {
+      el.classList.toggle('folder-is-open', !wasOpen);
+    });
   });
 
   el.querySelector('.folder-close-btn').addEventListener('click', e => {
     e.stopPropagation();
-    el.classList.remove('folder-is-open');
+    requestAnimationFrame(() => el.classList.remove('folder-is-open'));
   });
 
   return el;

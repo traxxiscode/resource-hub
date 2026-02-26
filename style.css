@@ -943,36 +943,50 @@ body {
   flex-shrink: 0;
 }
 
-/* Folder action row — drag handle + rename + delete, inline at bottom of card */
+/* Folder action row — rename + delete only (drag handle is absolute top-right like resource cards) */
 .folder-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   opacity: 0;
   transition: opacity var(--transition);
-  margin-top: 2px;
+  position: absolute;
+  top: 8px;
+  right: 38px;  /* leave room for the drag handle at far right */
 }
 .folder-closed:hover .folder-actions { opacity: 1; }
-.folder-actions .drag-handle {
-  /* override the absolute positioning from resource-card drag handle */
-  position: static;
-  opacity: 1;
-  margin-right: auto;  /* push rename/delete to the right */
-  font-size: 15px;
-  padding: 4px 6px;
-}
 
 /* ---- Open face — spans full row ---- */
-.folder-open { display: none; }
-.group-folder-card.folder-is-open { grid-column: 1 / -1; }
-.group-folder-card.folder-is-open .folder-closed { display: none; }
-.group-folder-card.folder-is-open .folder-open {
-  display: block;
+/*
+  The delay comes from toggling display:none which forces a full reflow
+  and grid recalculation. Instead we use a max-height + opacity transition
+  on .folder-open, and only change grid-column when actually open.
+  The closed face uses visibility so it doesn't reflow on hide.
+*/
+.folder-open {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.22s ease, opacity 0.18s ease;
+  /* Don't display:none — keep it in flow so transition works */
+  pointer-events: none;
   background: var(--surface2);
   border: 1.5px solid var(--orange);
   border-radius: var(--radius-lg);
-  overflow: hidden;
   box-shadow: 0 0 0 3px rgba(255,112,34,0.08);
+}
+
+.group-folder-card.folder-is-open {
+  grid-column: 1 / -1;
+}
+.group-folder-card.folder-is-open .folder-closed {
+  display: none;
+}
+.group-folder-card.folder-is-open .folder-open {
+  max-height: 2000px;
+  opacity: 1;
+  pointer-events: auto;
+  transition: max-height 0.28s ease, opacity 0.18s ease;
 }
 
 .folder-open-header {
@@ -1014,7 +1028,7 @@ body {
    DRAG & DROP — SortableJS
    ============================================================ */
 
-/* The ⠿ drag handle on resource cards (absolute, top-right) */
+/* Unified drag handle — absolute top-right on both resource cards and folder cards */
 .drag-handle {
   position: absolute;
   top: 10px;
@@ -1031,7 +1045,8 @@ body {
   touch-action: none;
   user-select: none;
 }
-.resource-card:hover .drag-handle { opacity: 1; }
+.resource-card:hover .drag-handle,
+.folder-closed:hover .drag-handle { opacity: 1; }
 .drag-handle:hover { color: var(--text); }
 .drag-handle:active { cursor: grabbing; }
 
