@@ -174,6 +174,25 @@
     </div>
   </div>
 
+  <!-- ===== MODAL: Add / Edit Group ===== -->
+  <div class="modal-backdrop" id="groupModal" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
+    <div class="modal modal--sm">
+      <div class="modal-header">
+        <h2 class="modal-title" id="groupModalTitle">Add Group</h2>
+        <button class="modal-close" data-close="groupModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-subtext">Groups let you organise resources within a section into collapsible folders.</p>
+        <label class="field-label" for="grpName">Group Name</label>
+        <input type="text" id="grpName" class="field-input" placeholder="e.g. Quick Links" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="groupModal">Cancel</button>
+        <button class="btn btn-accent" id="saveGroupBtn">Save Group</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== MODAL: Move / Copy Resource ===== -->
   <div class="modal-backdrop" id="moveModal" role="dialog" aria-modal="true" aria-labelledby="moveModalTitle">
     <div class="modal modal--sm">

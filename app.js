@@ -24,6 +24,7 @@ const firebaseConfig = {
    ============================== */
 const COL_SECTIONS  = 'sections';
 const COL_RESOURCES = 'resources';
+const COL_GROUPS    = 'groups';          // { sectionId, name, order }
 const COL_CONFIG    = 'config';          // stores { editKeyHash, editKeySalt }
 const CONFIG_DOC    = 'editKey';
 
@@ -40,13 +41,19 @@ const SESSION_FAILS   = 'resourceHubFails';
    ============================== */
 let db;
 let sections  = [];   // [{ id, name, order }]
-let resources = [];   // [{ id, sectionId, name, url, desc, tags[] }]
+let resources = [];   // [{ id, sectionId, groupId, name, url, desc, tags[], order }]
+let groups    = [];   // [{ id, sectionId, name, order }]
 let isEditor  = false;
 
 let editingResourceId = null;
 let editingSectionId  = null;
+let editingGroupId    = null;
 let contextResourceId = null;
 let contextSectionId  = null;
+
+// Drag state
+let dragSrcId   = null;  // resource id being dragged
+let dragOverId  = null;  // resource id being hovered over
 
 /* ==============================
    FIREBASE INIT
@@ -55,14 +62,14 @@ async function initFirebase() {
   const { initializeApp }   = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
   const { getFirestore, collection, doc, getDocs, getDoc,
           setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
-          orderBy, query, where }  = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+          orderBy, query, where, writeBatch }  = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
   const app = initializeApp(firebaseConfig);
   db = getFirestore(app);
 
   // Expose Firestore helpers globally for the rest of the module
   window._fs = { collection, doc, getDocs, getDoc, setDoc, addDoc,
-                 updateDoc, deleteDoc, onSnapshot, orderBy, query, where };
+                 updateDoc, deleteDoc, onSnapshot, orderBy, query, where, writeBatch };
 
   return db;
 }
@@ -122,13 +129,15 @@ function lockOut() {
 async function loadData() {
   const { collection, getDocs, orderBy, query } = window._fs;
 
-  const [secSnap, resSnap] = await Promise.all([
+  const [secSnap, resSnap, grpSnap] = await Promise.all([
     getDocs(query(collection(db, COL_SECTIONS),  orderBy('order', 'asc'))),
-    getDocs(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')))
+    getDocs(query(collection(db, COL_RESOURCES), orderBy('order', 'asc'))),
+    getDocs(query(collection(db, COL_GROUPS),    orderBy('order', 'asc')))
   ]);
 
   sections  = secSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   resources = resSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  groups    = grpSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 /* ==============================
@@ -142,8 +151,13 @@ function subscribeRealtime() {
     render();
   });
 
-  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('createdAt', 'asc')), snap => {
+  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('order', 'asc')), snap => {
     resources = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+
+  onSnapshot(query(collection(db, COL_GROUPS), orderBy('order', 'asc')), snap => {
+    groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   });
 }
@@ -363,6 +377,8 @@ function render() {
 
   sections.forEach(sec => {
     const secResources = resources.filter(r => r.sectionId === sec.id);
+    const secGroups    = groups.filter(g => g.sectionId === sec.id)
+                               .sort((a,b) => (a.order||0) - (b.order||0));
 
     const filtered = query
       ? secResources.filter(r =>
@@ -384,6 +400,7 @@ function render() {
     const sectionActions = isEditor ? `
       <div class="section-actions">
         <button class="btn btn-sm btn-outline add-res-to-sec" data-section-id="${sec.id}">+ Resource</button>
+        <button class="btn btn-sm btn-outline add-group-to-sec" data-section-id="${sec.id}">+ Group</button>
         <button class="btn-icon rename-sec" data-section-id="${sec.id}" title="Rename section">✎</button>
         <button class="btn-icon delete-sec" data-section-id="${sec.id}" title="Delete section">✕</button>
       </div>` : '';
@@ -394,15 +411,75 @@ function render() {
         <span class="section-count">${filtered.length}</span>
         ${sectionActions}
       </div>
-      <div class="resource-grid" id="grid-${sec.id}"></div>
+      <div class="section-content" id="content-${sec.id}"></div>
     `;
 
-    const grid = block.querySelector(`#grid-${sec.id}`);
+    const contentEl = block.querySelector(`#content-${sec.id}`);
 
-    if (filtered.length === 0) {
-      grid.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
+    if (filtered.length === 0 && secGroups.length === 0) {
+      contentEl.innerHTML = `<p class="section-empty">No resources yet. Add one above.</p>`;
     } else {
-      filtered.forEach((r, i) => grid.appendChild(buildCard(r, i)));
+      // Ungrouped resources (no groupId or groupId not in current groups list)
+      const validGroupIds = new Set(secGroups.map(g => g.id));
+      const ungrouped = filtered.filter(r => !r.groupId || !validGroupIds.has(r.groupId))
+                                .sort((a,b) => (a.order||0) - (b.order||0));
+
+      // Build ungrouped grid (drop target for "no group")
+      const ungroupedGrid = document.createElement('div');
+      ungroupedGrid.className = 'resource-grid';
+      ungroupedGrid.dataset.sectionId = sec.id;
+      ungroupedGrid.dataset.groupId   = '';
+      ungroupedGrid.id = `grid-${sec.id}`;
+
+      if (ungrouped.length === 0 && !query) {
+        if (isEditor) {
+          ungroupedGrid.innerHTML = `<div class="drop-zone-hint">Drop resources here</div>`;
+        }
+      } else {
+        ungrouped.forEach((r, i) => ungroupedGrid.appendChild(buildCard(r, i)));
+      }
+      contentEl.appendChild(ungroupedGrid);
+
+      // Groups
+      secGroups.forEach(grp => {
+        const grpResources = filtered.filter(r => r.groupId === grp.id)
+                                     .sort((a,b) => (a.order||0) - (b.order||0));
+
+        const grpEl = document.createElement('div');
+        grpEl.className = 'resource-group';
+        grpEl.dataset.groupId   = grp.id;
+        grpEl.dataset.sectionId = sec.id;
+
+        const grpActions = isEditor ? `
+          <div class="group-actions">
+            <button class="btn-icon rename-group" data-group-id="${grp.id}" title="Rename group">✎</button>
+            <button class="btn-icon delete-group" data-group-id="${grp.id}" title="Delete group">✕</button>
+          </div>` : '';
+
+        grpEl.innerHTML = `
+          <div class="group-header">
+            <span class="group-toggle" data-group-id="${grp.id}">▾</span>
+            <span class="group-name" data-group-id="${grp.id}">${esc(grp.name)}</span>
+            <span class="section-count">${grpResources.length}</span>
+            ${grpActions}
+          </div>
+          <div class="resource-grid group-grid" id="grid-${grp.id}" data-section-id="${sec.id}" data-group-id="${grp.id}"></div>
+        `;
+
+        const grpGrid = grpEl.querySelector(`#grid-${grp.id}`);
+        if (grpResources.length === 0) {
+          if (isEditor) grpGrid.innerHTML = `<div class="drop-zone-hint">Drop resources here</div>`;
+        } else {
+          grpResources.forEach((r, i) => grpGrid.appendChild(buildCard(r, i)));
+        }
+
+        contentEl.appendChild(grpEl);
+      });
+    }
+
+    // Wire up drag-and-drop on all grids in this section
+    if (isEditor && !query) {
+      block.querySelectorAll('.resource-grid').forEach(grid => setupGridDrop(grid));
     }
 
     main.appendChild(block);
@@ -425,6 +502,10 @@ function buildCard(r, index) {
   card.dataset.resourceId = r.id;
   card.style.animationDelay = `${index * 30}ms`;
 
+  if (isEditor) {
+    card.draggable = true;
+  }
+
   const faviconUrl = getFavicon(r.url);
   const domain     = getDomain(r.url);
   const letter     = r.name.charAt(0).toUpperCase();
@@ -441,7 +522,12 @@ function buildCard(r, index) {
     ? `<button class="card-menu-btn" data-resource-id="${r.id}" title="Options">⋯</button>`
     : '';
 
+  const dragHandle = isEditor
+    ? `<span class="drag-handle" title="Drag to reorder">⠿</span>`
+    : '';
+
   card.innerHTML = `
+    ${dragHandle}
     <div class="card-top">
       <div class="card-favicon">
         ${faviconUrl
@@ -459,7 +545,103 @@ function buildCard(r, index) {
     ${menuBtn ? `<div class="card-footer">${menuBtn}</div>` : ''}
   `;
 
+  // Drag events
+  if (isEditor) {
+    card.addEventListener('dragstart', e => {
+      dragSrcId = r.id;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', r.id);
+    });
+    card.addEventListener('dragend', () => {
+      dragSrcId = null;
+      card.classList.remove('dragging');
+      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    });
+  }
+
   return card;
+}
+
+/* ==============================
+   DRAG & DROP: GRID SETUP
+   ============================== */
+function setupGridDrop(grid) {
+  grid.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const afterEl = getDragAfterElement(grid, e.clientY, e.clientX);
+    const dragging = document.querySelector('.dragging');
+    if (!dragging) return;
+
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+
+    if (afterEl == null) {
+      grid.appendChild(dragging);
+    } else {
+      grid.insertBefore(dragging, afterEl);
+    }
+    grid.classList.add('drag-over');
+  });
+
+  grid.addEventListener('dragleave', e => {
+    if (!grid.contains(e.relatedTarget)) {
+      grid.classList.remove('drag-over');
+    }
+  });
+
+  grid.addEventListener('drop', async e => {
+    e.preventDefault();
+    grid.classList.remove('drag-over');
+    if (!dragSrcId) return;
+
+    const newGroupId   = grid.dataset.groupId   || null;
+    const newSectionId = grid.dataset.sectionId;
+
+    // Collect new order from DOM
+    const cards = [...grid.querySelectorAll('.resource-card[data-resource-id]')];
+    const updates = cards.map((card, idx) => ({
+      id:        card.dataset.resourceId,
+      order:     idx,
+      groupId:   newGroupId,
+      sectionId: newSectionId
+    }));
+
+    // Persist to Firestore
+    await saveResourceOrder(updates, dragSrcId, newGroupId, newSectionId);
+  });
+}
+
+function getDragAfterElement(container, y, x) {
+  const draggableElements = [...container.querySelectorAll('.resource-card:not(.dragging)')];
+  return draggableElements.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offsetY = y - box.top - box.height / 2;
+    if (offsetY < 0 && offsetY > closest.offset) {
+      return { offset: offsetY, element: child };
+    }
+    return closest;
+  }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+async function saveResourceOrder(updates, draggedId, newGroupId, newSectionId) {
+  if (!isEditor) return;
+  const { doc, writeBatch: wb } = window._fs;
+  const batch = wb(db);
+
+  for (const u of updates) {
+    const ref = doc(db, COL_RESOURCES, u.id);
+    const data = { order: u.order };
+    // Only update groupId/sectionId for the dragged card
+    if (u.id === draggedId) {
+      data.groupId   = u.groupId   || '';
+      data.sectionId = u.sectionId;
+    }
+    batch.update(ref, data);
+  }
+
+  await batch.commit();
 }
 
 /* ==============================
@@ -491,7 +673,49 @@ async function deleteSection(id) {
     fsQuery(collection(db, COL_RESOURCES), where('sectionId', '==', id))
   );
   await Promise.all(resSnap.docs.map(d => deleteDoc(doc(db, COL_RESOURCES, d.id))));
+
+  // Delete all groups in this section
+  const grpSnap = await getDocs(
+    fsQuery(collection(db, COL_GROUPS), where('sectionId', '==', id))
+  );
+  await Promise.all(grpSnap.docs.map(d => deleteDoc(doc(db, COL_GROUPS, d.id))));
+
   await deleteDoc(doc(db, COL_SECTIONS, id));
+}
+
+/* ==============================
+   GROUPS (Firestore)
+   ============================== */
+async function addGroup(sectionId, name) {
+  if (!isEditor) return;
+  const { collection, addDoc } = window._fs;
+  const secGroups = groups.filter(g => g.sectionId === sectionId);
+  await addDoc(collection(db, COL_GROUPS), {
+    sectionId,
+    name: name.trim(),
+    order: secGroups.length,
+    createdAt: Date.now()
+  });
+}
+
+async function renameGroup(id, name) {
+  if (!isEditor) return;
+  const { doc, updateDoc } = window._fs;
+  await updateDoc(doc(db, COL_GROUPS, id), { name: name.trim() });
+}
+
+async function deleteGroup(id) {
+  if (!isEditor) return;
+  if (!confirm('Delete this group? Resources inside will be moved to ungrouped.')) return;
+  const { doc, deleteDoc, updateDoc, collection, getDocs, query: fsQuery, where } = window._fs;
+
+  // Ungroup resources
+  const resSnap = await getDocs(
+    fsQuery(collection(db, COL_RESOURCES), where('groupId', '==', id))
+  );
+  await Promise.all(resSnap.docs.map(d => updateDoc(doc(db, COL_RESOURCES, d.id), { groupId: '' })));
+
+  await deleteDoc(doc(db, COL_GROUPS, id));
 }
 
 /* ==============================
@@ -500,12 +724,15 @@ async function deleteSection(id) {
 async function addResource(data) {
   if (!isEditor) return;
   const { collection, addDoc } = window._fs;
+  const secResources = resources.filter(r => r.sectionId === data.sectionId);
   await addDoc(collection(db, COL_RESOURCES), {
     sectionId: data.sectionId,
+    groupId:   data.groupId   || '',
     name: data.name.trim(),
     url:  data.url.trim(),
     desc: data.desc ? data.desc.trim() : '',
     tags: data.tags ? data.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+    order: secResources.length,
     createdAt: Date.now()
   });
 }
@@ -620,6 +847,31 @@ function openSectionModal(sectionId = null) {
 }
 
 /* ==============================
+   OPEN GROUP MODAL
+   ============================== */
+function openGroupModal(sectionId, groupId = null) {
+  if (!isEditor) return;
+  const titleEl = document.getElementById('groupModalTitle');
+  const nameEl  = document.getElementById('grpName');
+  editingGroupId = groupId;
+
+  // Store sectionId in a data attr on the save button
+  document.getElementById('saveGroupBtn').dataset.sectionId = sectionId || '';
+
+  if (groupId) {
+    const grp = groups.find(g => g.id === groupId);
+    titleEl.textContent = 'Rename Group';
+    nameEl.value = grp ? grp.name : '';
+  } else {
+    titleEl.textContent = 'Add Group';
+    nameEl.value = '';
+  }
+
+  openModal('groupModal');
+  setTimeout(() => nameEl.focus(), 50);
+}
+
+/* ==============================
    OPEN MOVE MODAL
    ============================== */
 function openMoveModal(resourceId) {
@@ -723,11 +975,34 @@ document.addEventListener('click', e => {
   const addToSec = e.target.closest('.add-res-to-sec');
   if (addToSec && isEditor) { openResourceModal(null, addToSec.dataset.sectionId); return; }
 
+  const addGroupToSec = e.target.closest('.add-group-to-sec');
+  if (addGroupToSec && isEditor) { openGroupModal(addGroupToSec.dataset.sectionId); return; }
+
   const renameSec = e.target.closest('.rename-sec');
   if (renameSec && isEditor) { openSectionModal(renameSec.dataset.sectionId); return; }
 
   const deleteSec = e.target.closest('.delete-sec');
   if (deleteSec && isEditor) { deleteSection(deleteSec.dataset.sectionId); return; }
+
+  const renameGrp = e.target.closest('.rename-group');
+  if (renameGrp && isEditor) {
+    const grp = groups.find(g => g.id === renameGrp.dataset.groupId);
+    openGroupModal(grp ? grp.sectionId : null, renameGrp.dataset.groupId); return;
+  }
+
+  const deleteGrp = e.target.closest('.delete-group');
+  if (deleteGrp && isEditor) { deleteGroup(deleteGrp.dataset.groupId); return; }
+
+  // Group toggle collapse/expand
+  const grpToggle = e.target.closest('.group-toggle');
+  if (grpToggle) {
+    const grpEl   = grpToggle.closest('.resource-group');
+    const grpGrid = grpEl.querySelector('.group-grid');
+    const collapsed = grpEl.classList.toggle('collapsed');
+    grpToggle.textContent = collapsed ? '▸' : '▾';
+    grpGrid.style.display = collapsed ? 'none' : '';
+    return;
+  }
 
   const secName = e.target.closest('.section-name');
   if (secName && isEditor && !e.target.closest('.section-actions')) {
@@ -848,6 +1123,29 @@ document.getElementById('secName').addEventListener('keydown', e => {
 });
 
 /* ==============================
+   SAVE GROUP
+   ============================== */
+document.getElementById('saveGroupBtn').addEventListener('click', async () => {
+  if (!isEditor) return;
+  const name      = document.getElementById('grpName').value.trim();
+  const sectionId = document.getElementById('saveGroupBtn').dataset.sectionId;
+  if (!name) { document.getElementById('grpName').focus(); return; }
+
+  const btn = document.getElementById('saveGroupBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  if (editingGroupId) await renameGroup(editingGroupId, name);
+  else await addGroup(sectionId, name);
+
+  btn.disabled = false; btn.textContent = 'Save Group';
+  closeModal('groupModal');
+});
+
+document.getElementById('grpName').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('saveGroupBtn').click();
+});
+
+/* ==============================
    CONFIRM MOVE / COPY
    ============================== */
 document.getElementById('confirmMoveBtn').addEventListener('click', async () => {
@@ -872,7 +1170,7 @@ document.getElementById('authKeyInput').addEventListener('keydown', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeContextMenu();
-    ['resourceModal', 'sectionModal', 'moveModal', 'authModal'].forEach(id => {
+    ['resourceModal', 'sectionModal', 'groupModal', 'moveModal', 'authModal'].forEach(id => {
       if (document.getElementById(id).classList.contains('open')) closeModal(id);
     });
   }
