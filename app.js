@@ -132,15 +132,14 @@ async function loadData() {
 
   const [secSnap, resSnap] = await Promise.all([
     getDocs(query(collection(db, COL_SECTIONS),  orderBy('order', 'asc'))),
-    getDocs(query(collection(db, COL_RESOURCES), orderBy('order', 'asc')))
+    getDocs(collection(db, COL_RESOURCES))
   ]);
 
   sections  = secSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   resources = resSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // Groups collection may not exist yet — don't let it block the rest
   try {
-    const grpSnap = await getDocs(query(collection(db, COL_GROUPS), orderBy('order', 'asc')));
+    const grpSnap = await getDocs(collection(db, COL_GROUPS));
     groups = grpSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
     groups = [];
@@ -158,12 +157,12 @@ function subscribeRealtime() {
     render();
   });
 
-  onSnapshot(query(collection(db, COL_RESOURCES), orderBy('order', 'asc')), snap => {
+  onSnapshot(collection(db, COL_RESOURCES), snap => {
     resources = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   });
 
-  onSnapshot(query(collection(db, COL_GROUPS), orderBy('order', 'asc')), snap => {
+  onSnapshot(collection(db, COL_GROUPS), snap => {
     groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   }, () => { groups = []; });
@@ -424,30 +423,38 @@ function render() {
     if (query) {
       const grid = document.createElement('div');
       grid.className = 'resource-grid';
-      filtered.sort((a, b) => (a.order || 0) - (b.order || 0))
+      filtered.sort((a, b) => (a.sectionOrder ?? a.createdAt ?? 0) - (b.sectionOrder ?? b.createdAt ?? 0))
               .forEach((r, i) => grid.appendChild(buildCard(r, i)));
       contentEl.appendChild(grid);
       main.appendChild(block);
       return;
     }
 
-    // --- NORMAL MODE: ungrouped cards + group folder-cards in one grid ---
+    // --- NORMAL MODE: interleave ungrouped cards and group folder-cards by sectionOrder ---
     const ungrouped = secResources
-      .filter(r => !r.groupId || !validGroupIds.has(r.groupId))
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
+      .filter(r => !r.groupId || !validGroupIds.has(r.groupId));
+
+    // Build a unified sorted list of items: each is either {type:'resource', data} or {type:'group', data}
+    // sectionOrder is set by drag-and-drop; fall back to createdAt for older items
+    const items = [
+      ...ungrouped.map(r => ({ type: 'resource', data: r, order: r.sectionOrder ?? r.createdAt ?? 0 })),
+      ...secGroups.map(g => ({ type: 'group',    data: g, order: g.sectionOrder ?? g.createdAt ?? 0 }))
+    ].sort((a, b) => a.order - b.order);
 
     const grid = document.createElement('div');
     grid.className = 'resource-grid';
     grid.dataset.sectionId = sec.id;
     grid.id = `grid-${sec.id}`;
 
-    ungrouped.forEach((r, i) => grid.appendChild(buildCard(r, i)));
-
-    secGroups.forEach((grp, gi) => {
-      const grpResources = secResources
-        .filter(r => r.groupId === grp.id)
-        .sort((a, b) => (a.order || 0) - (b.order || 0));
-      grid.appendChild(buildGroupCard(grp, grpResources, gi));
+    items.forEach((item, i) => {
+      if (item.type === 'resource') {
+        grid.appendChild(buildCard(item.data, i));
+      } else {
+        const grpResources = secResources
+          .filter(r => r.groupId === item.data.id)
+          .sort((a, b) => (a.order ?? a.createdAt ?? 0) - (b.order ?? b.createdAt ?? 0));
+        grid.appendChild(buildGroupCard(item.data, grpResources, i));
+      }
     });
 
     if (secResources.length === 0 && secGroups.length === 0 && isEditor) {
@@ -638,18 +645,16 @@ function setupGridDrag(grid) {
     handle: '.sortable-handle',
     ghostClass: 'drag-placeholder',
     dragClass: 'drag-ghost',
-    // Prevent dragging inside open folder grids
-    filter: '.folder-open-grid',
-    onEnd(evt) {
+    onEnd() {
       const items = [...grid.querySelectorAll(':scope > .resource-card, :scope > .group-folder-card')];
       const { doc, writeBatch: wb } = window._fs;
       const batch = wb(db);
-      let resIdx = 0, grpIdx = 0;
-      items.forEach(item => {
+      // Save each item's position in the unified section grid as sectionOrder
+      items.forEach((item, idx) => {
         if (item.classList.contains('resource-card')) {
-          batch.update(doc(db, COL_RESOURCES, item.dataset.resourceId), { order: resIdx++ });
+          batch.update(doc(db, COL_RESOURCES, item.dataset.resourceId), { sectionOrder: idx });
         } else if (item.classList.contains('group-folder-card')) {
-          batch.update(doc(db, COL_GROUPS, item.dataset.groupId), { order: grpIdx++ });
+          batch.update(doc(db, COL_GROUPS, item.dataset.groupId), { sectionOrder: idx });
         }
       });
       batch.commit();
@@ -1304,7 +1309,3 @@ async function init() {
 }
 
 init();
-
-
-
-//Check
