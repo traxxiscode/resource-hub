@@ -112,7 +112,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  font-size: 17px;          /* bumped from 15px */
+  font-size: 19px;
   line-height: 1.65;
   min-height: 100vh;
   overflow-x: hidden;
@@ -155,10 +155,10 @@ body {
 }
 
 .header-inner {
-  max-width: 1380px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0 32px;
-  height: 76px;           /* bumped from 66px */
+  padding: 0 40px;
+  height: 86px;
   display: flex;
   align-items: center;
   gap: 20px;
@@ -179,9 +179,9 @@ body {
 }
 
 .header-logo {
-  height: 42px;           /* bumped from 36px */
+  height: 48px;
   width: auto;
-  max-width: 160px;
+  max-width: 180px;
   object-fit: contain;
   display: block;
 }
@@ -208,7 +208,7 @@ body {
 
 .header-title {
   font-family: var(--font-head);
-  font-size: 1.25rem;     /* bumped */
+  font-size: 1.4rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -248,9 +248,9 @@ body {
   border-radius: 10px;
   color: var(--text);
   font-family: var(--font-body);
-  font-size: 15px;        /* bumped */
-  padding: 10px 38px 10px 42px;
-  width: 260px;
+  font-size: 16px;
+  padding: 12px 42px 12px 46px;
+  width: 280px;
   outline: none;
   transition: border-color var(--transition), width var(--transition), background var(--transition);
 }
@@ -258,7 +258,7 @@ body {
 .search-input:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px var(--blue-glow);
-  width: 340px;
+  width: 380px;
 }
 
 .search-clear {
@@ -380,9 +380,9 @@ body {
    MAIN LAYOUT
    ============================================================ */
 .main-content {
-  max-width: 1380px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 44px 32px 100px; /* bumped */
+  padding: 52px 40px 120px;
 }
 
 /* ============================================================
@@ -420,7 +420,7 @@ body {
    SECTIONS
    ============================================================ */
 .section-block {
-  margin-bottom: 60px;    /* bumped */
+  margin-bottom: 72px;
   animation: fadeUp 0.35s ease both;
 }
 
@@ -433,8 +433,8 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 22px;    /* bumped */
-  padding-bottom: 14px;
+  margin-bottom: 26px;
+  padding-bottom: 16px;
   background-image: linear-gradient(var(--border), var(--border)),
                     linear-gradient(90deg, var(--blue), var(--orange));
   background-size: 100% 1px, 90px 2px;
@@ -444,7 +444,7 @@ body {
 
 .section-name {
   font-family: var(--font-head);
-  font-size: 1.1rem;      /* bumped */
+  font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -464,13 +464,13 @@ body {
 }
 
 .section-count {
-  font-size: 13px;        /* bumped */
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-dim);
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 2px 10px;
+  padding: 3px 12px;
 }
 
 .section-actions {
@@ -487,8 +487,8 @@ body {
    ============================================================ */
 .resource-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); /* bumped min */
-  gap: 18px;              /* bumped */
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 22px;
 }
 
 /* ============================================================
@@ -499,15 +499,14 @@ body {
   background: var(--card-bg);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 22px 22px 18px; /* bumped */
+  padding: 26px 26px 20px;
   transition: border-color var(--transition), transform var(--transition),
               box-shadow var(--transition), background var(--transition);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   animation: fadeUp 0.3s ease both;
   overflow: hidden;
-  /* Card is an <a> tag — reset link styles */
   text-decoration: none;
   color: inherit;
   cursor: pointer;
@@ -540,9 +539,9 @@ body {
 }
 
 .card-favicon {
-  width: 38px;            /* bumped */
-  height: 38px;
-  border-radius: 10px;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
   background: var(--surface3);
   border: 1px solid var(--border);
   flex-shrink: 0;
@@ -551,11 +550,11 @@ body {
   justify-content: center;
   overflow: hidden;
 }
-.card-favicon img { width: 22px; height: 22px; object-fit: contain; }
+.card-favicon img { width: 26px; height: 26px; object-fit: contain; }
 
 .card-favicon-letter {
   font-family: var(--font-head);
-  font-size: 15px;        /* bumped */
+  font-size: 18px;
   font-weight: 700;
   background: linear-gradient(135deg, var(--blue), var(--orange));
   -webkit-background-clip: text;
@@ -568,7 +567,7 @@ body {
 
 .card-name {
   font-family: var(--font-head);
-  font-size: 16px;        /* bumped */
+  font-size: 18px;
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
@@ -577,16 +576,16 @@ body {
 }
 
 .card-url {
-  font-size: 13px;        /* bumped */
+  font-size: 14px;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .card-desc {
-  font-size: 14px;        /* bumped */
+  font-size: 15px;
   color: var(--text-muted);
   line-height: 1.55;
   display: -webkit-box;
@@ -598,13 +597,13 @@ body {
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 
 .card-tag {
-  font-size: 12px;        /* bumped */
+  font-size: 13px;
   font-weight: 500;
   color: var(--orange);
   background: rgba(255,94,1,0.08);
   border: 1px solid rgba(255,94,1,0.2);
   border-radius: 5px;
-  padding: 2px 8px;
+  padding: 3px 10px;
   letter-spacing: 0.02em;
 }
 [data-theme="light"] .card-tag {
@@ -877,17 +876,16 @@ body {
 }
 .group-folder-card:not(.folder-is-open) .folder-closed:hover::before { opacity: 1; }
 
-/* 2x2 favicon mosaic */
 .folder-mosaic {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 5px;
-  width: 54px;
-  height: 54px;
+  gap: 6px;
+  width: 66px;
+  height: 66px;
   background: var(--surface3);
-  border-radius: 12px;
-  padding: 7px;
+  border-radius: 14px;
+  padding: 8px;
   flex-shrink: 0;
 }
 .fp-cell {
@@ -924,7 +922,7 @@ body {
 }
 .folder-name {
   font-family: var(--font-head);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
@@ -933,13 +931,13 @@ body {
   flex: 1;
 }
 .folder-count {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--orange);
   background: rgba(255,112,34,0.1);
   border: 1px solid rgba(255,112,34,0.18);
   border-radius: 20px;
-  padding: 1px 7px;
+  padding: 2px 9px;
   flex-shrink: 0;
 }
 
@@ -1000,9 +998,9 @@ body {
 
 .folder-open-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 18px;
-  padding: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 22px;
+  padding: 22px;
 }
 
 /* ============================================================
